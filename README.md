@@ -9,7 +9,9 @@ A local stack for running a quantized LLM (Qwen3-27B) on Apple Silicon via **DFl
 This workspace lets you run **Claude Code locally** on your Mac in two ways:
 
 ### **1️⃣ Interactive Mode** (Development)
-Start an inference backend + Headroom, then open Claude Code interactively. The `bin/start_*_server.bash` scripts start/hand off server processes that keep running in the background, so you do **not** need dedicated long-running terminals just to keep inference/Headroom alive. Separate terminals are mainly useful for the interactive Claude Code session and optional dashboard monitoring. **Perfect for exploring, prototyping, and debugging.**
+Start an inference backend + Headroom, then open Claude Code interactively.  
+The `bin/start_*_server.bash` scripts hand off server processes to run in the background, so you do **not** need dedicated long-running terminals just to keep inference/Headroom alive.  
+Separate terminals are mainly useful for the interactive Claude Code session and optional dashboard monitoring. **Perfect for exploring, prototyping, and debugging.**
 
 ```bash
 # Terminal 1
