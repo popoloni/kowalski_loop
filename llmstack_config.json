@@ -1,0 +1,108 @@
+{
+  "dev_root": "./pacman_clone",
+  "plan_file": "./pacman_clone/.claude/plans/improvements_plan.json",
+  "log_dir": "./logs",
+  "dflash_log": "./logs/dflash_server.log",
+  "headroom_log": "./logs/headroom.log",
+  "headroom_traffic_log": "./logs/headroom_traffic.jsonl",
+  "timings_csv": "./logs/dflash_timings.csv",
+  "permission_mode": "acceptEdits",
+  "max_turns": 250,
+  "timeout_seconds": 3600,
+  "warmup_timeout_seconds": 120,
+  "max_retries": 3,
+  "max_resumes": 8,
+  "agent_format_retries": 2,
+  "allow_already_done_if_verified": true,
+  "size_threshold_bytes": 12000,
+  "debug_log": "./logs/ralph_debug.log",
+  "debug_max_chars": 0,
+  "agent_tools": [
+    "Read",
+    "Edit"
+  ],
+  "active_model": "mlx-gemma4-12b",
+  "models": {
+    "dflash-qwen27b-dense": {
+      "type": "dflash",
+      "target": "mlx-community/Qwen3.6-27B-4bit",
+      "draft": "z-lab/Qwen3.6-27B-DFlash",
+      "verify_mode": "adaptive",
+      "max_tokens": 8192,
+      "temp": 0.2,
+      "chat_template_args": {
+        "enable_thinking": false
+      },
+      "cache_max_entries": 64,
+      "cache_max_bytes": "12GB",
+      "max_snapshot_tokens": 16000,
+      "ram_required_gb": 48,
+      "description": "Dense 27B with DFlash speculative decoding"
+    },
+    "dflash-qwen35b-moe": {
+      "type": "dflash",
+      "target": "mlx-community/Qwen3.6-35B-A3B-4bit",
+      "draft": "z-lab/Qwen3.6-35B-A3B-DFlash",
+      "verify_mode": "adaptive",
+      "max_tokens": 8192,
+      "temp": 0.2,
+      "chat_template_args": {
+        "enable_thinking": false
+      },
+      "cache_max_entries": 64,
+      "cache_max_bytes": "12GB",
+      "max_snapshot_tokens": 16000,
+      "ram_required_gb": 56,
+      "best_for": "decode",
+      "description": "MoE 35B-A3B 4bit with DFlash speculative decoding"
+    },
+    "dflash-gemma4-12b": {
+      "type": "dflash",
+      "target": "mlx-community/gemma-4-12B-it-4bit",
+      "draft": "z-lab/gemma4-12B-it-DFlash",
+      "verify_mode": "adaptive",
+      "max_tokens": 8192,
+      "temp": 0.2,
+      "chat_template_args": {
+        "enable_thinking": false
+      },
+      "cache_max_entries": 64,
+      "cache_max_bytes": "12GB",
+      "max_snapshot_tokens": 16000,
+      "ram_required_gb": 16,
+      "best_for": "decode",
+      "description": "Dense 12B with DFlash speculative decoding"
+    },
+    "mlx-gemma4-12b": {
+      "type": "mlx",
+      "target": "mlx-community/gemma-4-12b-coder-fable5-composer2.5-4bit",
+      "draft": null,
+      "max_tokens": 1024,
+      "temp": 0.2,
+      "chat_template_args": {
+        "enable_thinking": false
+      },
+      "prompt_concurrency": 1,
+      "prefill_step_size": 2048,
+      "cache_max_entries": 64,
+      "cache_max_bytes": "8GB",
+      "ram_required_gb": 8,
+      "best_for": "quality",
+      "description": "Dense 12B on pure MLX server without DFlash"
+    },
+    "turboquant-qwen35b-moe": {
+      "type": "turboquant",
+      "target": "manjunathshiva/Qwen3.6-35B-A3B-tq3-g32",
+      "draft": null,
+      "kv_k_bits": 8,
+      "kv_v_bits": 3,
+      "kv_min_tokens": 128,
+      "prompt_concurrency": 1,
+      "max_tokens": 8192,
+      "temp": 0.2,
+      "ram_required_gb": 24,
+      "best_for": "agentic",
+      "description": "Sparse MoE 35B / ~3B active"
+    }
+  }
+}

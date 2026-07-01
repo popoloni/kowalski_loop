@@ -1,0 +1,26 @@
+# Virtual environment
+env/
+
+# Pacman clone (has its own git repo)
+pacman_clone/
+
+# Backup
+bck/
+
+# Old files
+old/
+
+# Logs
+logs/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+
+# macOS
+.DS_Store
+
+# VSCode
+.vscode/
