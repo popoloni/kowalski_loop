@@ -1,6 +1,22 @@
 import json
 import os
 
+VALID_PLUGIN_WHENS = {
+    "task",
+    "plan_complete",
+}
+
+VALID_PLUGIN_FAILURE_MODES = {
+    "fail",
+    "warn",
+}
+
+VALID_THINKING_MODES = {
+    "off",
+    "auto",
+    "on",
+}
+
 VALID_PERMISSION_MODES = {
     "default",
     "acceptEdits",
@@ -19,6 +35,13 @@ LEGACY_PERMISSION_MODE_ALIASES = {
 DEFAULT_CONFIG = {
     "dev_root": ".",
     "plan_file": "plan.json",
+    "loop_mode": "plan",
+    "continuous_queue_file": "task_queue.json",
+    "continuous_poll_seconds": 2,
+    "watch_queue_file": "task_queue.json",
+    "watch_root": ".",
+    "watch_poll_seconds": 2,
+    "watch_debounce_seconds": 0.5,
     "log_dir": "logs",
     "dflash_log": "logs/dflash_server.log",
     "headroom_log": "logs/headroom.log",
@@ -37,7 +60,61 @@ DEFAULT_CONFIG = {
     "require_change": True,
     "wiring_check": True,
     "review_enabled": False,
+    "verification_plugins": {},
+    "thinking_mode": "off",
 }
+
+
+def _normalize_string_list(value, label):
+    if value is None:
+        return []
+    if not isinstance(value, list) or any(not isinstance(item, str) or not item.strip() for item in value):
+        raise ValueError(f"{label} must be a list of non-empty strings")
+    return [item.strip() for item in value]
+
+
+def normalize_verification_plugins(raw_plugins):
+    if raw_plugins in (None, ""):
+        return {}
+    if not isinstance(raw_plugins, dict):
+        raise ValueError("verification_plugins must be an object mapping plugin names to definitions")
+
+    normalized = {}
+    for name, spec in raw_plugins.items():
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("verification_plugins keys must be non-empty strings")
+        if not isinstance(spec, dict):
+            raise ValueError(f"verification_plugins['{name}'] must be an object")
+
+        command = str(spec.get("command") or "").strip()
+        if not command:
+            raise ValueError(f"verification_plugins['{name}'].command is required")
+
+        when = str(spec.get("when", "task") or "task").strip().lower()
+        if when not in VALID_PLUGIN_WHENS:
+            raise ValueError(
+                f"verification_plugins['{name}'].when must be one of {sorted(VALID_PLUGIN_WHENS)}"
+            )
+
+        on_failure = str(spec.get("on_failure", "fail") or "fail").strip().lower()
+        if on_failure not in VALID_PLUGIN_FAILURE_MODES:
+            raise ValueError(
+                f"verification_plugins['{name}'].on_failure must be one of {sorted(VALID_PLUGIN_FAILURE_MODES)}"
+            )
+
+        enabled = spec.get("enabled", True)
+        if not isinstance(enabled, bool):
+            raise ValueError(f"verification_plugins['{name}'].enabled must be true or false")
+
+        normalized[name.strip()] = {
+            "command": command,
+            "when": when,
+            "languages": _normalize_string_list(spec.get("languages"), f"verification_plugins['{name}'].languages"),
+            "files": _normalize_string_list(spec.get("files"), f"verification_plugins['{name}'].files"),
+            "on_failure": on_failure,
+            "enabled": enabled,
+        }
+    return normalized
 
 
 def normalize_permission_mode(raw_mode):
@@ -61,6 +138,15 @@ def normalize_permission_mode(raw_mode):
         f"falling back to '{DEFAULT_CONFIG['permission_mode']}'."
     )
     return DEFAULT_CONFIG["permission_mode"]
+
+
+def normalize_thinking_mode(raw_mode):
+    mode = str(raw_mode or "").strip().lower()
+    if not mode:
+        return DEFAULT_CONFIG["thinking_mode"]
+    if mode in VALID_THINKING_MODES:
+        return mode
+    raise ValueError(f"thinking_mode must be one of {sorted(VALID_THINKING_MODES)}")
 
 
 def _abs_path(base_dir, value):
@@ -95,6 +181,8 @@ def load_config(config_path="llmstack_config.json"):
     cfg["permission_mode"] = normalize_permission_mode(cfg.get("permission_mode"))
     if "interactive_permission_mode" in cfg:
         cfg["interactive_permission_mode"] = normalize_permission_mode(cfg.get("interactive_permission_mode"))
+    cfg["verification_plugins"] = normalize_verification_plugins(cfg.get("verification_plugins"))
+    cfg["thinking_mode"] = normalize_thinking_mode(cfg.get("thinking_mode"))
 
     timeout_s = int(cfg.get("timeout_seconds", cfg["timeout_seconds"]))
     cfg["task_timeout"] = timeout_s

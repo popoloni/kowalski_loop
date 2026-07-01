@@ -4,6 +4,45 @@
 
 ---
 
+## 0 · Progress Snapshot (verified 2026-07-01)
+
+| Phase | Scope | Status |
+|-------|-------|--------|
+| **Phase 0** | Modular refactor (`llmstack/` package, services, core, CLI, shims) | ✅ **Done** |
+| **Phase 1** | Model generalization (registry, DFlash/TurboQuant backends, model-aware CCR, `model use/list/recommend`, hardening 1.9–1.13) | ✅ **Done** |
+| **Phase 2** | Loop modes (`plan`/`continuous`/`watch`/`supervised`) + priority ordering + smart retry | ✅ **Done** (2026-07-01) |
+| **Phase 3** | Pragmatic extensibility: pluggable gates + minimal `llmstack init` + per-task `thinking_mode` | ✅ **Done** (2026-07-01) |
+| **Phase 4** | Control plane (IPC bus, pause/stop) + Telegram notifier/controller | ⬜ **Not started** |
+| **Phase 5** | Dashboards & analytics (state-driven TUI, web dashboard, SQLite metrics) | ⬜ **Not started** |
+| **Phase 6** | Multi-project workflow (`project use`, named configs, project-scoped defaults) | ⬜ **Not started** |
+| **Phase 7** | Automated installation (`install.sh`/`doctor.sh`/`update.sh`) | ⬜ **Not started** |
+
+**Verification basis (code inspection + tests, 2026-07-01):**
+- `llmstack/modes/` contains `base.py` (`LoopMode` ABC), `plan_mode.py`, `continuous_mode.py`, `watch_mode.py`, `supervised_mode.py`, all exported from `__init__.py`.
+- `Supervisor._make_mode()` (`llmstack/core/supervisor.py`) dispatches on `config["loop_mode"]`; `run()` delegates to `mode.next_task()` / `on_result()` / `on_incomplete()` and calls `mode.close()` on exit.
+- Smart retry: `gates.verify_detailed()` returns `(ok, reason, feedback)`; `executors._retry_feedback_note()` injects the feedback into direct and agent retry prompts.
+- Pluggable gates: `config.normalize_verification_plugins()` validates `verification_plugins`; `gates.run_verification_plugins()` runs task-level plugins and `gates.run_plan_complete_plugins()` runs final suite hooks once at the end.
+- Thinking mode: `config.normalize_thinking_mode()` validates `thinking_mode`; `Executor._agent_env()` applies `off` / `auto` / `on` per task and records it in debug logs.
+- Init wizard: `llmstack init` writes a compact starter config, derives a starter plan path, and can optionally call `build_plan.py` for the provided goal.
+- Priority ordering: `PlanMode._ordered_tasks()` sorts by `(-priority, original_index)` and is inherited by all modes.
+- Corner-case suite `tests/test_phase2_modes.py` (13 checks: priority/ties, bad priority, all-done, continuous empty/append/invalid-JSON/list-shape/persist, watch enqueue/ignore/close-idempotent, supervised quit/skip, smart-retry note) → **ALL PASS**.
+- Phase 3 gate suite `tests/test_phase3_pluggable_gates.py` (8 checks: defaults disabled, invalid config fails fast, language/file filtering, smart-retry feedback, task opt-in/out, direct `plan_complete`, supervisor end hook) → **ALL PASS**.
+- Phase 3 init suite `tests/test_phase3_init_wizard.py` (3 checks: config creation + bootstrap plan, overwrite refusal, force overwrite) → **ALL PASS**.
+- No `control/`, `notify/`, or `dashboard/` packages exist yet under `llmstack/` (Phase 4+).
+
+### Phase 3 follow-up refinements
+
+- Add a non-interactive `llmstack init` flow beyond `--force` so the wizard can be scripted end-to-end.
+- Add more explicit starter config templates for `python`, `js`, and `generic` projects.
+
+### 👉 Recommended next step — **Phase 4 (control plane + Telegram)**
+
+Phase 3 is complete. The next meaningful seam is the control plane/state bus, because remote pause/stop/status and Telegram all become much cleaner once there is a shared runtime state surface.
+
+Then proceed to **Phase 4** for IPC + remote control. **Phase 5** (dashboards) remains downstream of the control/state surface. **Multi-project** moves later because it is the most likely to be reshaped by project-scoped control, notifier, and dashboard state.
+
+---
+
 ## 1 · Current State — Strengths and Weaknesses
 
 ### What works well
@@ -442,12 +481,12 @@ All modes implement `LoopMode` (`next_task()`, `on_result(task, result)`), selec
 
 | # | Task | Mode | Acceptance criteria |
 |---|------|------|---------------------|
-| 2.1 | `plan_mode.py` — wrap current ordered-plan behavior | `plan` | Pacman plan runs identically |
-| 2.2 | `continuous_mode.py` — read/append a queue, run forever | `continuous` | New task appended to `task_queue.json` is picked up |
-| 2.3 | `watch_mode.py` — `watchdog` observer, enqueue on file change | `watch` | Editing a `*.py` triggers a lint/fix task |
-| 2.4 | `supervised_mode.py` — preview next task, await approval (console or Telegram) | `supervised` | Loop blocks until approve/skip |
-| 2.5 | Priority ordering — honor a `priority` field on tasks | any | Higher-priority tasks run first |
-| 2.6 | Smart retry with error feedback — capture verify stderr, inject into retry prompt | core | Retry prompt contains the prior error |
+| 2.1 | `plan_mode.py` — wrap current ordered-plan behavior | `plan` | ✅ Done — `LoopMode` ABC + `PlanMode` reproduce the ordered-plan behavior identically |
+| 2.2 | `continuous_mode.py` — read/append a queue, run forever | `continuous` | ✅ Done — queue-backed mode reloads on append; new task appended to `task_queue.json` is picked up |
+| 2.3 | `watch_mode.py` — `watchdog` observer, enqueue on file change | `watch` | ✅ Done — editing a `*.py` enqueues a lint/fix task (watchdog observer + mtime fallback) |
+| 2.4 | `supervised_mode.py` — preview next task, await approval (console or Telegram) | `supervised` | ✅ Done — console approval blocks until approve/skip, with skipped tasks persisted |
+| 2.5 | Priority ordering — honor a `priority` field on tasks | any | ✅ Done — higher-priority tasks run first across plan, continuous, watch, and supervised modes |
+| 2.6 | Smart retry with error feedback — capture verify stderr, inject into retry prompt | core | ✅ Done — `verify_detailed` feedback is captured and injected into the next direct/agent retry prompt (truncated) |
 
 **Example smart-retry injection:**
 ```python
@@ -457,16 +496,74 @@ if attempt > 1 and last_error:
 
 ---
 
-## 6 · Phase 3 — Control Plane & Remote (Telegram)
+## 6 · Phase 3 — Pragmatic Extensibility Before Remote Control
 
-### 6.1 Control plane (prerequisite for remote)
-Phase 0 introduced `control/bus.py` + `control/state.py`. Here we expose them:
+This phase intentionally pulls forward the **low-coupling, high-leverage** pieces from the old Phase 5. The rule is strict: only ship features that fit the current single-process, single-project architecture and attach to seams that already exist today.
+
+### 6.1 Pluggable verification gates (anticipated old 5.3)
+
+Goal: extend verification without hardcoding more logic into `verify_detailed()`.
+
 | # | Task | Acceptance criteria |
 |---|------|---------------------|
-| 3.1 | `control/ipc.py` — UNIX-socket command server (pause/resume/stop/status/inject-task) | `llmstack ctl status` returns live state |
-| 3.2 | Wire `bus.wait_if_paused()` / `should_stop()` into supervisor | `llmstack ctl pause` halts after current task |
+| 3.1 | Add config schema for `verification_plugins` with defaults = disabled | ✅ Done — `load_config()` normalizes and validates plugin definitions; omitted config preserves current behavior |
+| 3.2 | Define plugin shape: `command`, `when`, `languages`, `files`, `on_failure`, `enabled` | ✅ Done — invalid plugin definitions fail fast with a clear config error |
+| 3.3 | Add gate runner in `core/gates.py` after built-in deterministic checks | ✅ Done — configured plugin commands run in `dev_root` and contribute pass/fail to verification |
+| 3.4 | Support task-level opt-in/opt-out (`task["verification_plugins"]` or `task["disable_plugins"]`) | ✅ Done — tasks can allow-list or suppress named plugins |
+| 3.5 | Define failure semantics: plugin stderr/stdout is fed into smart retry feedback | ✅ Done — failing `fail` plugins store feedback on the task for the next retry prompt |
+| 3.6 | Ship 2-3 example plugins in docs: `ruff check {file}`, `tsc --noEmit`, `pytest -x` on `plan_complete` | ✅ Done — README documents task plugins, `plan_complete`, interpolation, and examples |
+| 3.7 | Add narrow tests for plugin selection, substitution, pass/fail, and disabled-by-default behavior | ✅ Done — `tests/test_phase3_pluggable_gates.py` passes |
 
-### 6.2 Telegram notifier + controller
+**Design constraints:**
+- Preserve the built-in gates (`verify`, `expect`, `require_change`, `wiring`, `smoke`) as the default path.
+- Start with **shell-command plugins only**; no Python entrypoint/plugin loader system yet.
+- Keep interpolation minimal and explicit: `{file}`, `{dev_root}`, `{plan_file}` only.
+- `plan_complete` hooks must run only once at the end, not after every task.
+
+### 6.2 Minimal `llmstack init` wizard (anticipated old 5.1)
+
+Goal: reduce onboarding friction without introducing multi-project state yet.
+
+| # | Task | Acceptance criteria |
+|---|------|---------------------|
+| 3.8 | Add CLI subcommand `llmstack init` | ✅ Done — running it interactively creates a starter `llmstack_config.json` in the current workspace |
+| 3.9 | Ask only the minimum: `dev_root`, project type, goal, inference backend/model preference | ✅ Done — prompt flow completes in under a minute for a new user |
+| 3.10 | Generate a single-project config using current stable keys only | ✅ Done — produced config works with existing `run`, `interactive`, `model`, and `serve` commands |
+| 3.11 | Optionally bootstrap a starter plan path and call `build_plan.py` with the provided goal | ✅ Done — user ends with both config and a first draft plan |
+| 3.12 | Provide non-interactive flags for the same fields (`--dev-root`, `--goal`, `--project-type`) | ✅ Done — wizard can be used from scripts without prompt input |
+| 3.13 | Refuse to overwrite an existing config unless `--force` is passed | ✅ Done — existing work is protected by default |
+| 3.14 | Document 2-3 starter profiles (Python script, JS app, generic codebase) | ✅ Done — new user can choose a sensible default without editing many keys |
+
+**Scope guardrails:**
+- Single project only; do **not** invent `projects[]` yet.
+- No remote credentials, Telegram, or dashboard setup.
+- No installer responsibilities; this wizard writes config, not environments.
+
+### 6.3 Per-task `thinking_mode` (anticipated old 5.4)
+
+Goal: expose a controllable quality/cost knob for agentic tasks.
+
+| # | Task | Acceptance criteria |
+|---|------|---------------------|
+| 3.15 | Add config default `thinking_mode: "off"` and task override `thinking_mode` | ✅ Done — omitted values preserve today's behavior; task-level override wins |
+| 3.16 | Support values `off`, `auto`, `on` with validation in config/task normalization | ✅ Done — invalid values fail clearly instead of silently degrading |
+| 3.17 | Map the mode to Claude/CCR env toggles in `core/executors.py` | ✅ Done — `off` keeps current env, `auto` enables adaptive thinking, `on` enables full thinking |
+| 3.18 | Ensure the mode is visible in debug logs per task attempt | ✅ Done — debug log records the chosen thinking mode per task attempt |
+| 3.19 | Allow high-complexity tasks to opt in while cheap tasks stay off | ✅ Done — tasks can mix low-cost direct work with higher-effort agentic runs |
+| 3.20 | Document expected trade-offs (latency, token cost, quality) and recommended defaults | ✅ Done — README documents defaults, overrides, and trade-offs |
+
+---
+
+## 7 · Phase 4 — Control Plane & Remote (Telegram)
+
+### 7.1 Control plane (prerequisite for remote)
+Phase 0 introduced `control/bus.py` + `control/state.py`. Here we expose them after Phase 3 hardens the single-process UX and gate model:
+| # | Task | Acceptance criteria |
+|---|------|---------------------|
+| 4.1 | `control/ipc.py` — UNIX-socket command server (pause/resume/stop/status/inject-task) | `llmstack ctl status` returns live state |
+| 4.2 | Wire `bus.wait_if_paused()` / `should_stop()` into supervisor | `llmstack ctl pause` halts after current task |
+
+### 7.2 Telegram notifier + controller
 ```json
 {
   "telegram": {
@@ -480,50 +577,56 @@ Phase 0 introduced `control/bus.py` + `control/state.py`. Here we expose them:
 
 | # | Task | Acceptance criteria |
 |---|------|---------------------|
-| 3.3 | `notify/telegram.py` implements `Notifier.emit(event)` | Task events arrive in chat |
-| 3.4 | Auto notifications: complete / failed / plan done / crash / stalled | Each event delivered once |
-| 3.5 | Command handlers: `/status`, `/plan`, `/stop`, `/pause`, `/resume`, `/logs [n]`, `/metrics` | Commands drive the IPC control plane |
-| 3.6 | Advanced: `/task "<prompt>"` (inject), `/model list`, `/model use <name>` | Inject reaches the queue; model switch restarts services |
-| 3.7 | Security: token from env var only, `allowed_chat_ids` whitelist, per-command rate limit | Unknown chat IDs rejected; no secret in repo |
+| 4.3 | `notify/telegram.py` implements `Notifier.emit(event)` | Task events arrive in chat |
+| 4.4 | Auto notifications: complete / failed / plan done / crash / stalled | Each event delivered once |
+| 4.5 | Command handlers: `/status`, `/plan`, `/stop`, `/pause`, `/resume`, `/logs [n]`, `/metrics` | Commands drive the IPC control plane |
+| 4.6 | Advanced: `/task "<prompt>"` (inject), `/model list`, `/model use <name>` | Inject reaches the queue; model switch restarts services |
+| 4.7 | Security: token from env var only, `allowed_chat_ids` whitelist, per-command rate limit | Unknown chat IDs rejected; no secret in repo |
 
 **Notification examples:** `✅ Task 5/22 ghosts.js (12.3s)` · `❌ Task 6 failed after 3 attempts (verify gate)` · `🎉 Plan complete 22/22 in 45m` · `🔥 DFlash crashed — restarting`.
 
 ---
 
-## 7 · Phase 4 — Dashboards & Analytics
+## 8 · Phase 5 — Dashboards & Analytics
 
 | # | Task | Acceptance criteria |
 |---|------|---------------------|
-| 4.1 | Move Rich TUI into `dashboard/tui.py`, read from `control/state.py` only | TUI no longer parses logs directly where state exists |
-| 4.2 | `dashboard/web.py` — FastAPI + WebSocket streaming the same state | Reachable on LAN, live metrics |
-| 4.3 | Per-task metrics in SQLite (`task_id, attempt, outcome, prefill_s, decode_s, tps`) | Queryable history |
-| 4.4 | Reports: daily summary (tasks, retries, avg time) emitted via notifier | Daily message/file produced |
+| 5.1 | Move Rich TUI into `dashboard/tui.py`, read from `control/state.py` only | TUI no longer parses logs directly where state exists |
+| 5.2 | `dashboard/web.py` — FastAPI + WebSocket streaming the same state | Reachable on LAN, live metrics |
+| 5.3 | Per-task metrics in SQLite (`task_id, attempt, outcome, prefill_s, decode_s, tps`) | Queryable history |
+| 5.4 | Reports: daily summary (tasks, retries, avg time) emitted via notifier | Daily message/file produced |
 
 ---
 
-## 8 · Phase 5 — Other Improvements
+## 9 · Phase 6 — Multi-Project Workflow
 
 | # | Task | Notes |
 |---|------|-------|
-| 5.1 | `llmstack init` wizard — ask `dev_root`, project type, goal → write config + run `build-plan.py` | Interactive scaffolding |
-| 5.2 | Multi-project config + `llmstack project use <name>` | Array of projects, each with own dev_root/gates |
-| 5.3 | Pluggable verification gates via config | e.g. `ruff check`, `tsc --noEmit`, `cargo check`, `pytest` |
-| 5.4 | Thinking/reasoning toggle per task (`thinking_mode: auto/on/off`) | On for complex agent tasks |
+| 6.1 | Multi-project config + `llmstack project use <name>` | Array/map of named projects, each with own `dev_root`, plan path, loop defaults, and gate defaults |
+| 6.2 | Project-scoped state separation for logs, checkpoints, and queue files | Switching projects does not leak runtime state |
+| 6.3 | Project-scoped control/dashboard integration | IPC status and future dashboards identify the active project cleanly |
+| 6.4 | Optional project templates layered on top of the minimal wizard | `llmstack init --template js-app` can target a named project entry |
 
-**Pluggable gates example:**
+**Multi-project example:**
 ```json
 {
-  "verification_plugins": {
-    "python_lint": { "command": "ruff check {file}", "languages": [".py"] },
-    "ts_typecheck": { "command": "npx tsc --noEmit", "languages": [".ts", ".tsx"] },
-    "suite": { "command": "pytest -x", "on": "plan_complete" }
+  "active_project": "pacman",
+  "projects": {
+    "pacman": {
+      "dev_root": "./pacman_clone",
+      "plan_file": "./pacman_clone/.claude/plans/pacman_plan.json"
+    },
+    "api": {
+      "dev_root": "./services/api",
+      "plan_file": "./services/api/.claude/plans/api_plan.json"
+    }
   }
 }
 ```
 
 ---
 
-## 9 · Phase 6 — Automated Installation (LAST)
+## 10 · Phase 7 — Automated Installation (LAST)
 
 Installation is automated **only after the codebase is modular and feature-complete**, so the installer provisions a known-good structure rather than a moving target.
 
@@ -615,15 +718,16 @@ Update `dflash-mlx`/`turboquant-mlx-full` (project venv), **`headroom-ai`** (its
 ---
 
 ## 11 · Execution Order (summary)
-1. **Phase 0 — Modular refactor** (foundation; behavior-preserving)
-2. **Phase 1 — Model registry / generalization**
-3. **Phase 2 — Loop modes + smart retry**
-4. **Phase 3 — Control plane + Telegram**
-5. **Phase 4 — Dashboards & analytics**
-6. **Phase 5 — Wizard, multi-project, pluggable gates**
-7. **Phase 6 — Automated installation (install/doctor/update)**
+1. ✅ **Phase 0 — Modular refactor** (foundation; behavior-preserving) — *done*
+2. ✅ **Phase 1 — Model registry / generalization** — *done*
+3. ✅ **Phase 2 — Loop modes + priority ordering + smart retry** — *done*
+4. ✅ **Phase 3 — Pluggable gates + minimal init + per-task thinking_mode** — *done*
+5. ⬅️ **Phase 4 — Control plane + Telegram** — *NEXT*
+6. ⬜ **Phase 5 — Dashboards & analytics**
+7. ⬜ **Phase 6 — Multi-project workflow**
+8. ⬜ **Phase 7 — Automated installation (install/doctor/update)**
 
-> Rationale: every feature after Phase 0 attaches to stable seams (backends, modes, notifiers, gates, control bus). Automating installation last means the installer targets the final, modular layout instead of being rewritten at each step.
+> Rationale: after Phase 2, the cheapest high-value work is whatever attaches to already-stable seams (`config`, `gates`, `executors`, `cli`) without first requiring shared runtime state. Control, dashboards, and multi-project support all become cleaner once those local seams are hardened; installation still stays last so it targets the final shape.
 
 ---
 

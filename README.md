@@ -377,7 +377,31 @@ Complete reference of all available parameters:
   "agent_tools": ["Read", "Edit"],
   "require_change": true,
   "wiring_check": true,
-  "review_enabled": false
+  "review_enabled": false,
+  "verification_plugins": {
+    "python_lint": {
+      "command": "ruff check {file}",
+      "when": "task",
+      "languages": [".py"],
+      "on_failure": "fail",
+      "enabled": true
+    },
+    "suite": {
+      "command": "pytest -x",
+      "when": "plan_complete",
+      "on_failure": "fail",
+      "enabled": true
+    }
+  },
+  "loop_mode": "plan",
+  "continuous_queue_file": "task_queue.json",
+  "continuous_poll_seconds": 2,
+  "watch_root": ".",
+  "watch_queue_file": "task_queue.json",
+  "watch_poll_seconds": 2,
+  "watch_debounce_seconds": 0.5,
+  "thinking_mode": "off",
+  "supervised_approval_mode": "console"
 }
 ```
 
@@ -418,6 +442,53 @@ Complete reference of all available parameters:
 | **`wiring_check`** | boolean | `true` | `true` &#124; `false` | **Wiring gate**: Enabled (`true`) — every `*.js` file must be referenced in `index.html`, and every referenced file must exist (catches orphan/unused JS). Disabled (`false`) — Ralph skips wiring validation. Recommended: `true` for frontend projects, `false` for non-web. |
 | **`review_enabled`** | boolean | `false` | `true` &#124; `false` | **LLM review gate** (soft, optional): Enabled (`true`) — the weak model critiques the diff against the task spec. **Not blocking** (deterministic gates are the real protection); mostly informational. Disabled (`false`) — skips review. Recommended: `false` unless extra scrutiny needed. |
 
+### Pluggable Gate Parameters
+
+The built-in gates remain the default path. `verification_plugins` lets you append extra shell-based checks without changing Ralph's code.
+
+| Parameter | Type | Default | Possible Values | Description |
+|---|---|---|---|---|
+| **`verification_plugins`** | object | `{}` | map of plugin name → plugin definition | Additional verification hooks. Empty object means the feature is effectively disabled and current behavior is unchanged. |
+
+Each plugin definition supports:
+
+| Field | Type | Default | Possible Values | Description |
+|---|---|---|---|---|
+| **`command`** | string | — | Any shell command | Required. Runs from `dev_root`. Supports `{file}`, `{dev_root}`, and `{plan_file}` interpolation. |
+| **`when`** | string | `"task"` | `"task"` &#124; `"plan_complete"` | `task` runs after a task's built-in deterministic checks and smoke test. `plan_complete` runs once after the whole plan finishes. |
+| **`languages`** | array[string] | `[]` | extensions like `".py"`, `".ts"` | Optional file-extension filter for task-level plugins. |
+| **`files`** | array[string] | `[]` | shell-style patterns like `"src/*.py"` | Optional task file filter using `fnmatch` patterns. |
+| **`on_failure`** | string | `"fail"` | `"fail"` &#124; `"warn"` | `fail` blocks verification and feeds stderr/stdout into smart retry. `warn` logs the failure and continues. |
+| **`enabled`** | boolean | `true` | `true` &#124; `false` | Allows shipping plugins in config while toggling them on/off explicitly. |
+
+### Thinking Mode
+
+`thinking_mode` controls whether Claude Code stays in the current no-thinking posture or uses more reasoning on agentic tasks.
+
+| Parameter | Type | Default | Possible Values | Description |
+|---|---|---|---|---|
+| **`thinking_mode`** | string | `"off"` | `"off"` &#124; `"auto"` &#124; `"on"` | Global default for agentic tasks. `off` keeps the current behavior, `auto` enables adaptive thinking while keeping full thinking off, and `on` enables both. Per-task overrides win. |
+
+Task-level override:
+- Add `"thinking_mode": "auto"` or `"on"` to a task to override the global default.
+- The chosen mode is visible in the agent debug log for each attempt.
+- The mode only affects agentic execution; direct-generation tasks keep their current behavior.
+
+### Loop Mode Parameters
+
+These control **how** Ralph selects and runs tasks. See [Loop Modes](#loop-modes) for a full walkthrough.
+
+| Parameter | Type | Default | Possible Values | Description |
+|---|---|---|---|---|
+| **`loop_mode`** | string | `"plan"` | `"plan"` &#124; `"continuous"` &#124; `"watch"` &#124; `"supervised"` | Selects the loop strategy. `plan` = run a fixed plan once (classic behavior). `continuous` = poll a queue file for new tasks. `watch` = auto-enqueue fix tasks when `.py` files change. `supervised` = ask for console approval before each task. |
+| **`continuous_queue_file`** | string | `"task_queue.json"` | Any file path (relative to CWD) | **Continuous mode only.** Queue file that Ralph polls. Tasks appended here (list or `{"tasks": [...]}`) are picked up on the next poll. Invalid JSON is tolerated (Ralph warns and waits). |
+| **`continuous_poll_seconds`** | number | `2` | `0.1` to `60` | **Continuous mode only.** Seconds between queue re-reads while idle. |
+| **`watch_root`** | string | `"."` | Any directory path (relative to CWD) | **Watch mode only.** Directory tree monitored for `.py` changes. |
+| **`watch_queue_file`** | string | `"task_queue.json"` | Any file path (relative to CWD) | **Watch mode only.** File where auto-generated fix tasks are written (also honored if you append tasks manually). |
+| **`watch_poll_seconds`** | number | `2` | `0.1` to `60` | **Watch mode only.** Seconds between filesystem re-scans (mtime fallback in addition to OS events). |
+| **`watch_debounce_seconds`** | number | `0.5` | `0` to `10` | **Watch mode only.** Coalescing window so rapid successive saves of the same file enqueue only one task. |
+| **`supervised_approval_mode`** | string | `"console"` | `"console"` | **Supervised mode only.** Approval channel. Currently `console` (interactive prompt in the terminal). Telegram approval is planned for a later phase. |
+
 ### Permission Modes Explained
 
 The `permission_mode` setting controls how Claude Code approves tool calls during autonomous execution:
@@ -446,9 +517,64 @@ Ralph applies a **verification pipeline** to every completed task:
 5. **Format fallback (per-task strategy)** — if an agent task repeatedly fails with provider formatting errors, set `"on_format_error": "direct_context_fallback"` in that task to regenerate `file + context` with direct mode and then run standard verification.
 6. **Wiring check** (controlled by `wiring_check`) — Verifies no orphan JS and all referenced files exist.
 7. **Behavioral smoke** — Runs the task's `smoke` code (Node.js assertions). Catches runtime bugs.
-8. **Optional LLM review** (controlled by `review_enabled`) — Optional diff critique (disabled by default).
+8. **Pluggable task plugins** (controlled by `verification_plugins`) — Runs extra shell-based checks filtered by task file / extension. Failing `fail` plugins feed stderr/stdout into smart retry.
+9. **Thinking mode** (controlled by `thinking_mode`) — Controls whether the agent runs with thinking disabled, adaptive, or fully on.
+10. **Optional LLM review** (controlled by `review_enabled`) — Optional diff critique (disabled by default).
+11. **Plan-complete plugins** — After all tasks finish, Ralph runs any `verification_plugins` with `"when": "plan_complete"` exactly once.
 
 If any gate fails, the task is rolled back and retried.
+
+### Pluggable Verification Plugins
+
+Use this when built-in `verify` / `expect` / `smoke` are not enough and you want reusable checks in config instead of repeating them in every task.
+
+Example:
+
+```json
+{
+  "verification_plugins": {
+    "python_lint": {
+      "command": "ruff check {file}",
+      "when": "task",
+      "languages": [".py"],
+      "on_failure": "fail"
+    },
+    "ts_typecheck": {
+      "command": "npx tsc --noEmit",
+      "when": "task",
+      "files": ["src/*.ts", "src/*.tsx"],
+      "on_failure": "warn"
+    },
+    "suite": {
+      "command": "pytest -x",
+      "when": "plan_complete",
+      "on_failure": "fail"
+    }
+  }
+}
+```
+
+Task-level control:
+- Set `verification_plugins` on a task to run only a named subset.
+- Set `disable_plugins` on a task to suppress named plugins.
+
+Example task:
+
+```json
+{
+  "id": "task_07",
+  "prompt": "Refactor the parser without changing behavior.",
+  "file": "parser.py",
+  "verification_plugins": ["python_lint"],
+  "disable_plugins": ["suite"]
+}
+```
+
+Notes:
+- Plugin commands run from `dev_root`.
+- Plugin config is validated at startup; invalid definitions fail fast.
+- `plan_complete` plugins do **not** run after every task. They run once after the plan finishes.
+- `warn` plugins are informational; `fail` plugins become part of the retry loop.
 
 ---
 
@@ -505,6 +631,36 @@ EOF
 # 4. Run Ralph
 bash bin/launch_ralph.bash
 ```
+
+### Bootstrap a New Workspace
+
+Use the interactive wizard when you want a minimal starter config and an optional first plan:
+
+```bash
+python -m llmstack.cli init
+```
+
+The wizard asks for:
+- `dev_root`
+- project type
+- goal
+- model/backend preference
+- whether to generate a starter plan immediately
+
+It writes a compact `llmstack_config.json` with stable keys only, derives a starter plan path under `./.claude/plans/`, and optionally calls `build_plan.py` for the provided goal. The generated config records `project_type`, a `project_template` block (`name`, `language`, `description`, `starter_layout`, `plan_name`), and the chosen `project_goal` alongside the usual `dev_root`, `active_model`, `plan_file`, `loop_mode`, `permission_mode`, `thinking_mode`, and `verification_plugins` keys.
+
+Useful flag:
+- `--force` overwrites an existing `llmstack_config.json`. It works both interactively and combined with the scriptable flags (e.g. `llmstack init --force --non-interactive ...`).
+
+Scriptable mode:
+- `--non-interactive` skips prompts and uses defaults or the values you pass.
+- `--dev-root`, `--project-type`, `--goal`, and `--model` let you pin the generated config.
+- `--bootstrap-plan` or `--no-bootstrap-plan` control whether a starter plan is generated.
+
+Supported starter templates:
+- `python` creates a Python-oriented config with `pyproject.toml`, `src/`, and `tests/` in the template metadata.
+- `js` creates a JavaScript-oriented config with `package.json`, `src/`, and `tests/`.
+- `generic` keeps the template language-agnostic.
 
 ---
 
@@ -598,6 +754,9 @@ Each task in the plan file has this structure:
   "verify": "node --check game.js",
   "expect": ["createBoard", "renderBoard"],
   "require_change": true,
+  "verification_plugins": ["python_lint"],
+  "disable_plugins": ["suite"],
+  "thinking_mode": "auto",
   "smoke": [
     "const fs=require('fs'); ...",
     "console.log('✓ smoke OK');"
@@ -619,8 +778,12 @@ Each task in the plan file has this structure:
 | **`verify`** | string | — | Shell command to check syntax/correctness after execution. Must exit 0 on success. If it fails, the task is rolled back and retried. Ralph runs this from `dev_root`. | `"node --check game.js"` |
 | **`expect`** | array[string] | — | Feature markers: strings that **must** appear in `file` after execution (case-insensitive). Useful for verifying functions, classes, or keywords were created. | `["function createBoard", "const BOARD_SIZE"]` |
 | **`require_change`** | boolean | — | Override global `require_change` config for this task. If `true`, the task **must** modify `file` or it fails (prevents no-ops). | `true` = fail if no change; `false` = allow no-op |
+| **`verification_plugins`** | array[string] | — | Optional allow-list of plugin names to run for this task. If omitted, all matching enabled task-level plugins may run. | `["python_lint"]`, `["ruff", "unit_smoke"]` |
+| **`disable_plugins`** | array[string] | — | Optional deny-list of plugin names to suppress for this task, even if they match globally. | `["suite"]`, `["python_lint"]` |
+| **`thinking_mode`** | string | — | Optional per-task override for agentic reasoning. `off` keeps current behavior, `auto` enables adaptive thinking, `on` enables full thinking. | `"off"`, `"auto"`, `"on"` |
 | **`smoke`** | array[string] or string | — | **Behavioral smoke test**: Node.js code to assert runtime behavior. Runs via `node -e` from `dev_root`. Nothing is written to the repo. Use to verify logic, APIs, or side effects. | `["const g=require('./game.js'); console.log(g.checkWin ? '✓' : '✗');"]` |
-| **`status`** | string | — | Execution status used for resume tracking. Ralph updates this after each run. | `"pending"` (not started); `"completed"` (finished); `"failed"` (rolled back) |
+| **`priority`** | integer | — | Task priority for ordering (higher runs first). Non-numeric/missing values default to `0`. Ties keep the original plan order (stable). Honored by all loop modes. | `10` (urgent); `0` (default); `-1` (defer) |
+| **`status`** | string | — | Execution status used for resume tracking. Ralph updates this after each run. Loop modes also use `"skipped"` (skipped by supervisor or already done). | `"pending"` (not started); `"completed"` (finished); `"skipped"` (skipped); `"failed"` (rolled back) |
 | **`max_tokens`** | integer | — | Override default token limit (8192) for this task's responses. Use higher for large files, lower for quick tasks. | `4096`, `16384` |
 | **`tools`** | array[string] | — | Explicitly set tools available to Claude Code for this task. If omitted, uses config's `agent_tools`. | `["Read", "Edit", "Write"]` |
 | **`permission_mode`** | string | — | Override global `permission_mode` for this task. | `"default"`, `"acceptEdits"`, `"plan"`, `"auto"`, `"dontAsk"`, `"bypassPermissions"` |
@@ -855,6 +1018,144 @@ Example:
   "status": "pending"  ← Ralph will retry with new prompt
 }
 ```
+
+---
+
+## Loop Modes
+
+By default Ralph runs a fixed plan once, top to bottom (`plan` mode). The `loop_mode`
+config key lets you switch the **task-selection strategy** without changing anything
+else about verification, executors, or gates. All four modes share the same task
+schema, the same 6-layer verification pipeline, and the same git checkpointing.
+
+| Mode | When to use | Task source | Stops when |
+|------|-------------|-------------|-----------|
+| **`plan`** | One-off builds from a written plan (classic behavior). | `plan_file` | All tasks completed/skipped |
+| **`continuous`** | Long-running worker: drop tasks into a queue file and Ralph keeps draining it. | `continuous_queue_file` (polled) | You stop it (Ctrl+C) |
+| **`watch`** | Guardrail while you code: auto-fix `.py` files as you save them. | Filesystem events under `watch_root` | You stop it (Ctrl+C) |
+| **`supervised`** | Human-in-the-loop: approve/skip each task before it runs. | `plan_file` | All tasks resolved, or you quit at a prompt |
+
+Select a mode in `llmstack_config.json`:
+
+```json
+{ "loop_mode": "continuous" }
+```
+
+### Task Priority (all modes)
+
+Add an integer `priority` to any task to reorder execution — **higher runs first**.
+Missing or non-numeric priorities default to `0`, and ties preserve the original
+order in the file (stable sort). This works in every loop mode.
+
+```json
+{
+  "tasks": [
+    { "id": "t1", "prompt": "Nice-to-have refactor", "file": "a.py", "priority": 0 },
+    { "id": "t2", "prompt": "Critical hotfix",        "file": "b.py", "priority": 10 },
+    { "id": "t3", "prompt": "Cleanup",                "file": "c.py", "priority": -5 }
+  ]
+}
+```
+Execution order above: `t2` (10) → `t1` (0) → `t3` (-5).
+
+### Smart Retry (all modes)
+
+When a task fails its `verify` command (or another deterministic gate), Ralph captures
+the failure detail (stderr/stdout, missing markers, etc.) and injects it into the
+**next retry prompt** — so the model sees *why* it failed and can correct itself.
+No configuration is required; it applies automatically within the existing
+`max_retries` / `max_resumes` budget. The injected feedback is truncated to keep the
+prompt focused.
+
+### 1. Continuous Mode
+
+Ralph runs your plan, then **keeps watching** `continuous_queue_file`. Append new
+tasks (as a JSON list or a `{"tasks": [...]}` object) and they are picked up on the
+next poll — no restart needed. Completed tasks have their `status` written back to the
+queue file, so you can inspect progress externally.
+
+```json
+{
+  "loop_mode": "continuous",
+  "continuous_queue_file": "task_queue.json",
+  "continuous_poll_seconds": 2
+}
+```
+
+Then run Ralph and feed it tasks from another terminal:
+
+```bash
+# Terminal 1
+bash bin/launch_ralph.bash
+
+# Terminal 2 — append a task to the queue at any time
+cat > my_project/task_queue.json <<'EOF'
+{ "tasks": [
+  { "id": "q1", "prompt": "Add a health-check endpoint", "file": "server.py",
+    "verify": "python -m py_compile server.py" }
+] }
+EOF
+```
+
+Notes:
+- The queue file path is **relative to the current working directory** (typically
+  `dev_root`), matching `plan_file` behavior.
+- Invalid JSON is tolerated: Ralph prints a warning and keeps waiting for a valid file,
+  so a half-written save won't crash the loop.
+- Ralph reloads the queue only when the file's modification time changes, so polling is
+  cheap.
+
+### 2. Watch Mode
+
+Ralph monitors `watch_root` for changes to `.py` files and **auto-enqueues a fix task**
+for each edited file. Each generated task verifies with `py_compile`, so a syntax error
+you just introduced gets flagged (and repaired) immediately.
+
+```json
+{
+  "loop_mode": "watch",
+  "watch_root": ".",
+  "watch_queue_file": "task_queue.json",
+  "watch_poll_seconds": 2,
+  "watch_debounce_seconds": 0.5
+}
+```
+
+```bash
+bash bin/launch_ralph.bash
+# ...now edit any .py under watch_root and save; Ralph reacts automatically.
+```
+
+Behavior:
+- Uses OS filesystem events **plus** an mtime-based scan fallback (more reliable on
+  macOS, where some editors write via atomic-rename).
+- **Debounced**: several rapid saves of the same file collapse into a single task.
+- **Ignored automatically**: non-`.py` files, the queue file itself, and anything under
+  `.git`, `node_modules`, `env`, `__pycache__`, `logs`, and `old`.
+- You can still append tasks to `watch_queue_file` manually — they're processed too.
+- Requires the `watchdog` package (already in the project venv).
+
+### 3. Supervised Mode
+
+Ralph pauses before each task and shows a preview (id, priority, file, label, prompt),
+then waits for your decision at the console.
+
+```json
+{
+  "loop_mode": "supervised",
+  "supervised_approval_mode": "console"
+}
+```
+
+At each prompt (`Approve task? [a]pprove / [s]kip / [q]uit:`):
+
+| Input | Aliases | Effect |
+|-------|---------|--------|
+| **approve** | `a`, `approve`, `y`, `yes` | Run the task through the normal pipeline. |
+| **skip** | `s`, `skip`, `n`, `no` | Mark the task `skipped`, persist it, move on. |
+| **quit** | `q`, `quit`, `stop` | Stop the services and end the run cleanly. |
+
+Priority ordering still applies, so higher-priority tasks are presented first.
 
 ---
 

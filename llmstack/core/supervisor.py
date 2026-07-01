@@ -3,8 +3,12 @@ import os
 import time
 
 from llmstack.core.executors import Executor
-from llmstack.core.gates import verify_detailed
+from llmstack.core.gates import run_plan_complete_plugins
 from llmstack.core.git_ckpt import GitManager
+from llmstack.modes.continuous_mode import ContinuousMode
+from llmstack.modes.plan_mode import PlanMode
+from llmstack.modes.supervised_mode import SupervisedMode
+from llmstack.modes.watch_mode import WatchMode
 
 
 class Supervisor:
@@ -25,30 +29,30 @@ class Supervisor:
     def ensure_git(self):
         self.git.ensure_git()
 
-    def _has_usable_progress(self, task):
-        changed = self.git.changed_files()
-        if not changed:
-            return False
-
-        target = task.get("file")
-        context = set(task.get("context") or [])
-        if target:
-            context.add(target)
-
-        if not context:
-            return True
-        return bool(changed.intersection(context))
-
     def load_plan(self):
         plan_file = self.config["plan_file"]
         if not os.path.exists(plan_file):
+            loop_mode = str(self.config.get("loop_mode", "plan")).strip().lower()
+            if loop_mode in ("continuous", "watch"):
+                return {"tasks": []}
             raise FileNotFoundError(f"Plan file '{plan_file}' not found")
         with open(plan_file, encoding="utf-8") as f:
             return json.load(f)
 
+    def _make_mode(self, plan):
+        loop_mode = str(self.config.get("loop_mode", "plan")).strip().lower()
+        if loop_mode == "continuous":
+            return ContinuousMode(self.config, self.dev_root, plan, self.git, self.executor, self.services)
+        if loop_mode == "watch":
+            return WatchMode(self.config, self.dev_root, plan, self.git, self.executor, self.services)
+        if loop_mode == "supervised":
+            return SupervisedMode(self.config, self.dev_root, plan, self.git, self.executor, self.services)
+        return PlanMode(self.config, self.dev_root, plan, self.git, self.executor, self.services)
+
     def run(self):
         plan = self.load_plan()
-        tasks = plan.get("tasks", [])
+        mode = self._make_mode(plan)
+        tasks = mode.tasks
         print(f"📋 [Ralph] Loaded {len(tasks)} tasks.")
         self.ensure_git()
 
@@ -56,11 +60,8 @@ class Supervisor:
         if any(self.executor.choose_executor(t) == "agent" for t in pending):
             self.services.warm_up_cache()
 
-        for task in tasks:
-            if task.get("status") == "completed":
-                print(f"⏭️  [Ralph] Skipping Task {task.get('id')} (completed)")
-                continue
-
+        task = mode.next_task()
+        while task is not None:
             executor_type = self.executor.choose_executor(task)
             if executor_type == "agent" and not self.executor.syntax_ok(task):
                 print("🧹 [Ralph] Corrupt leftover detected — restoring to last checkpoint.")
@@ -84,97 +85,39 @@ class Supervisor:
                 else:
                     outcome = self.executor.execute_task(task, attempt=n, resuming=(resumes > 0))
 
-                if outcome == "FORMAT_ERROR" and executor_type == "agent":
-                    if task.get("on_format_error") == "direct_context_fallback":
-                        print("🛟 [Ralph] Agent format error persisted — falling back to direct context generation.")
-                        outcome = self.executor.run_direct_context_fallback(task, attempt=n)
-                    else:
-                        print("⚠️  [Ralph] FORMAT_ERROR with no fallback strategy configured.")
-                        outcome = "AGENT_ERROR"
-
-                if outcome == "OK":
-                    task["status"] = "completed"
-                    with open(self.config["plan_file"], "w", encoding="utf-8") as f:
-                        json.dump(plan, f, indent=2)
-                    self.git.git_checkpoint(task, label="verified")
-                    print(f"✅ [Ralph] Task {task.get('id')} COMPLETE & verified.")
-                    done = True
-                elif outcome == "ALREADY_DONE":
-                    allow_already_done = task.get(
-                        "allow_already_done_if_verified",
-                        self.config.get("allow_already_done_if_verified", False),
-                    )
-                    if not allow_already_done:
-                        hard_fails += 1
-                        print(f"⚠️  [Ralph] Agent says already_done but policy is disabled "
-                              f"({hard_fails}/{self.config['max_retries']}).")
-                        time.sleep(2)
-                        continue
-
-                    ok, reason = verify_detailed(
-                        task,
-                        self.dev_root,
-                        self.git,
-                        self.config,
-                        require_change_override=False,
-                    )
-                    if ok:
-                        task["status"] = "completed"
-                        with open(self.config["plan_file"], "w", encoding="utf-8") as f:
-                            json.dump(plan, f, indent=2)
-                        self.git.git_checkpoint(task, label="already-done-verified")
-                        print(f"✅ [Ralph] Task {task.get('id')} ALREADY_DONE and verified.")
-                        done = True
-                    else:
-                        hard_fails += 1
-                        self.git.restore_to_checkpoint(task)
-                        print(f"⚠️  [Ralph] ALREADY_DONE verification failed ({reason}) — rolled back "
-                              f"({hard_fails}/{self.config['max_retries']}).")
-                        time.sleep(3)
-                elif outcome == "SERVER_CRASH":
-                    print("♻️  [Ralph] Server crash — restarting (not counted).")
-                    self.services.restart()
-                    if executor_type == "agent" and self.executor.syntax_ok(task):
-                        self.git.wip_commit(task)
-                elif outcome in ("TIMEOUT", "AGENT_ERROR"):
-                    if (executor_type == "agent"
-                            and self.executor.syntax_ok(task)
-                            and self._has_usable_progress(task)):
-                        if resumes < self.config["max_resumes"]:
-                            self.git.wip_commit(task)
-                            resumes += 1
-                            print(f"⏸️  [Ralph] {outcome} but file is VALID — progress kept, RESUMING "
-                                  f"(resume {resumes}/{self.config['max_resumes']}).")
-                        else:
-                            hard_fails += 1
-                            print(f"⚠️  [Ralph] Resume budget exhausted for task {task.get('id')} "
-                                  f"({resumes}/{self.config['max_resumes']}); counting as hard fail "
-                                  f"({hard_fails}/{self.config['max_retries']}).")
-                            time.sleep(3)
-                    else:
-                        hard_fails += 1
-                        self.git.restore_to_checkpoint(task)
-                        print(f"⚠️  [Ralph] {outcome} (no usable progress) — rolled back "
-                              f"({hard_fails}/{self.config['max_retries']}).")
-                        time.sleep(5)
-                else:
-                    hard_fails += 1
-                    self.git.restore_to_checkpoint(task)
-                    print(f"⚠️  [Ralph] {outcome} — rolled back ({hard_fails}/{self.config['max_retries']}).")
-                    time.sleep(5)
+                result = mode.on_result(
+                    task,
+                    outcome,
+                    {
+                        "attempt": n,
+                        "executor_type": executor_type,
+                        "hard_fails": hard_fails,
+                        "resumes": resumes,
+                        "done": done,
+                    },
+                )
+                hard_fails = result["hard_fails"]
+                resumes = result["resumes"]
+                done = result["done"]
 
             if not done:
-                if (executor_type == "agent"
-                        and self.executor.syntax_ok(task)
-                        and self._has_usable_progress(task)):
-                    self.git.wip_commit(task)
-                    print(f"🚧 [Ralph] Task {task.get('id')} INCOMPLETE — valid progress KEPT as WIP. "
-                          f"Re-run to resume from here. Halting.")
-                else:
-                    self.git.restore_to_checkpoint(task)
-                    print(f"🚨 [Ralph] Task {task.get('id')} NOT completed — rolled back. Halting.")
+                mode.on_incomplete(task, executor_type)
                 self.services.stop()
                 return
 
+            task = mode.next_task()
+
+        plugins_ok, _, plugins_feedback, _ = run_plan_complete_plugins(self.dev_root, self.config)
+        if not plugins_ok:
+            close = getattr(mode, "close", None)
+            if callable(close):
+                close()
+            self.services.stop()
+            raise RuntimeError(plugins_feedback)
+
         print("\n🎉 [Ralph] All tasks verified and committed!")
+        close = getattr(mode, "close", None)
+        if callable(close):
+            close()
         self.services.stop()
+        return

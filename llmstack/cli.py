@@ -11,6 +11,219 @@ from llmstack.services.ccr_service import CCRService
 from llmstack.services.stack import ServiceStack
 
 CONFIG_PATH = "llmstack_config.json"
+INIT_PROJECT_TEMPLATES = {
+    "python": {
+        "language": "python",
+        "description": "Python project template with pyproject.toml, src/, and tests/",
+        "starter_layout": ["pyproject.toml", "src/", "tests/"],
+        "plan_name": "python_plan.json",
+        "goal_default": "Build a Python project",
+    },
+    "js": {
+        "language": "javascript",
+        "description": "JavaScript project template with package.json, src/, and tests/",
+        "starter_layout": ["package.json", "src/", "tests/"],
+        "plan_name": "js_plan.json",
+        "goal_default": "Build a JavaScript project",
+    },
+    "generic": {
+        "language": "generic",
+        "description": "Language-agnostic project template for any codebase",
+        "starter_layout": ["README.md", "tasks.md"],
+        "plan_name": "plan.json",
+        "goal_default": "Build a generic project",
+    },
+}
+
+
+def _parse_init_options(extra):
+    parser = argparse.ArgumentParser(prog="llmstack init", add_help=False)
+    parser.add_argument("--dev-root")
+    parser.add_argument("--project-type")
+    parser.add_argument("--goal")
+    parser.add_argument("--model")
+    parser.add_argument("--force", action="store_true")
+    parser.add_argument("--non-interactive", action="store_true")
+    parser.add_argument("--bootstrap-plan", dest="bootstrap_plan", action="store_true")
+    parser.add_argument("--no-bootstrap-plan", dest="bootstrap_plan", action="store_false")
+    parser.set_defaults(bootstrap_plan=None)
+    return parser.parse_args(extra or [])
+
+
+def _slugify(text, fallback="project"):
+    slug = []
+    prev_dash = False
+    for ch in str(text or "").strip().lower():
+        if ch.isalnum():
+            slug.append(ch)
+            prev_dash = False
+        elif not prev_dash:
+            slug.append("-")
+            prev_dash = True
+    result = "".join(slug).strip("-")
+    return result or fallback
+
+
+def _prompt_input(prompt, default="", input_func=input):
+    suffix = f" [{default}]" if default else ""
+    value = input_func(f"{prompt}{suffix}: ").strip()
+    return value or default
+
+
+def _prompt_yes_no(prompt, default=True, input_func=input):
+    suffix = " [Y/n]" if default else " [y/N]"
+    value = input_func(f"{prompt}{suffix}: ").strip().lower()
+    if not value:
+        return default
+    return value in ("y", "yes", "true", "1")
+
+
+def _select_init_model(registry, input_func=input):
+    items = list(registry.items())
+    default_name = next((name for name, cfg in items if cfg.get("best_for") == "agentic"), items[0][0])
+    print("📚 [llmstack init] Available models:")
+    for idx, (name, cfg) in enumerate(items, 1):
+        marker = " (recommended)" if name == default_name else ""
+        print(f"  {idx}. {name} [{cfg.get('type', 'unknown')}] -> {cfg.get('target', '(missing target)')}{marker}")
+
+    while True:
+        raw = input_func(f"Choose model/backend [default: {default_name}]: ").strip()
+        if not raw:
+            return default_name
+        if raw in registry:
+            return raw
+        if raw.isdigit():
+            idx = int(raw)
+            if 1 <= idx <= len(items):
+                return items[idx - 1][0]
+        print("❌ [llmstack init] Invalid selection. Enter a model name or number from the list above.")
+
+
+def _default_init_model(registry):
+    items = list(registry.items())
+    return next((name for name, cfg in items if cfg.get("best_for") == "agentic"), items[0][0])
+
+
+def _normalize_init_project_type(project_type):
+    slug = _slugify(project_type, fallback="generic")
+    aliases = {
+        "javascript": "js",
+        "typescript": "js",
+        "node": "js",
+        "nodejs": "js",
+        "py": "python",
+    }
+    return aliases.get(slug, slug) if slug in INIT_PROJECT_TEMPLATES or slug in aliases else "generic"
+
+
+def _project_template(project_type):
+    template_key = _normalize_init_project_type(project_type)
+    template = INIT_PROJECT_TEMPLATES.get(template_key, INIT_PROJECT_TEMPLATES["generic"])
+    return template_key, template
+
+
+def _build_init_config(dev_root, project_type, goal, active_model):
+    project_slug, template = _project_template(project_type)
+    plan_name = template["plan_name"]
+    plan_file = os.path.join(".", ".claude", "plans", plan_name)
+    return {
+        "dev_root": dev_root,
+        "project_type": project_slug,
+        "project_template": {
+            "name": project_slug,
+            "language": template["language"],
+            "description": template["description"],
+            "starter_layout": template["starter_layout"],
+            "plan_name": plan_name,
+        },
+        "project_goal": goal,
+        "plan_file": plan_file,
+        "active_model": active_model,
+        "loop_mode": "plan",
+        "permission_mode": "acceptEdits",
+        "thinking_mode": "off",
+        "verification_plugins": {},
+    }, plan_file
+
+
+def _write_init_config(config_path, init_config):
+    with open(config_path, "w", encoding="utf-8") as f:
+        json.dump(init_config, f, indent=2)
+        f.write("\n")
+
+
+def _default_plan_runner(goal, cwd):
+    subprocess.run([sys.executable, "-m", "llmstack.tools.build_plan", goal], cwd=cwd, check=True)
+
+
+def run_init(args, input_func=input, plan_runner=None, config_path=CONFIG_PATH):
+    cwd = os.getcwd()
+    config_path = os.path.abspath(config_path)
+    init_args = _parse_init_options(getattr(args, "extra", []))
+    force = bool(getattr(args, "force", False) or init_args.force)
+    if os.path.exists(config_path) and not force:
+        print(f"❌ [llmstack init] '{config_path}' already exists. Use --force to overwrite it.")
+        return 1
+
+    print("🧩 [llmstack init] Minimal workspace bootstrap")
+
+    registry = load_model_registry({})
+    if init_args.non_interactive:
+        dev_root = init_args.dev_root or "."
+        project_type = init_args.project_type or "generic"
+        _, template = _project_template(project_type)
+        goal = init_args.goal or template["goal_default"]
+        active_model = init_args.model or _default_init_model(registry)
+        bootstrap_plan = True if init_args.bootstrap_plan is None else init_args.bootstrap_plan
+    else:
+        dev_root = init_args.dev_root or _prompt_input("Dev root", default=".", input_func=input_func)
+        project_type = init_args.project_type or _prompt_input("Project type", default="generic", input_func=input_func)
+        _, template = _project_template(project_type)
+        goal_default = init_args.goal or template["goal_default"]
+        goal = _prompt_input("Goal", default=goal_default, input_func=input_func)
+        if init_args.model:
+            active_model = init_args.model
+            if active_model not in registry:
+                print(f"❌ [llmstack init] Unknown model '{active_model}'. Run 'llmstack model list'.")
+                return 1
+        else:
+            active_model = _select_init_model(registry, input_func=input_func)
+        bootstrap_plan = (
+            init_args.bootstrap_plan
+            if init_args.bootstrap_plan is not None
+            else _prompt_yes_no("Generate a starter plan now", default=True, input_func=input_func)
+        )
+
+    if active_model not in registry:
+        print(f"❌ [llmstack init] Unknown model '{active_model}'. Run 'llmstack model list'.")
+        return 1
+
+    init_config, plan_file = _build_init_config(dev_root, project_type, goal, active_model)
+
+    os.makedirs(dev_root, exist_ok=True)
+    os.makedirs(os.path.join(cwd, ".claude", "plans"), exist_ok=True)
+    os.makedirs(os.path.dirname(config_path) or ".", exist_ok=True)
+    _write_init_config(config_path, init_config)
+    print(f"✅ [llmstack init] Wrote {config_path}")
+    print(f"  dev_root={dev_root}")
+    print(f"  project_type={project_type}")
+    print(f"  project_language={init_config['project_template']['language']}")
+    print(f"  active_model={active_model}")
+    print(f"  plan_file={plan_file}")
+
+    if bootstrap_plan:
+        runner = plan_runner or _default_plan_runner
+        print("🧠 [llmstack init] Generating starter plan...")
+        try:
+            runner(goal, cwd)
+        except subprocess.CalledProcessError as exc:
+            print(f"⚠️  [llmstack init] Plan generation failed: {exc}")
+            return 1
+        print("✅ [llmstack init] Starter plan generated.")
+    else:
+        print("ℹ️  [llmstack init] Skipped starter plan generation.")
+
+    return 0
 
 
 def _load_raw_user_config(config_path=CONFIG_PATH):
@@ -334,10 +547,15 @@ def run_orchestrator(config, args):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="llmstack")
-    parser.add_argument("command", nargs="?", choices=["serve", "proxy", "interactive", "run", "dashboard", "doctor", "model"])
+    parser.add_argument("command", nargs="?", choices=["init", "serve", "proxy", "interactive", "run", "dashboard", "doctor", "model"])
     parser.add_argument("extra", nargs=argparse.REMAINDER,
                         help="Additional arguments passed to the chosen command.")
+    parser.add_argument("--force", action="store_true", help="Overwrite files when supported by the command.")
     args = parser.parse_args(argv)
+
+    if args.command == "init":
+        return run_init(args)
+
     config = load_config()
 
     if args.command == "serve":

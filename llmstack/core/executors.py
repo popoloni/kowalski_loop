@@ -7,7 +7,7 @@ import threading
 import time
 import urllib.request
 
-from llmstack.config import normalize_permission_mode
+from llmstack.config import normalize_permission_mode, normalize_thinking_mode
 from llmstack.core.gates import verify
 
 MAX_CONTINUATIONS = 6
@@ -83,6 +83,49 @@ class Executor:
             if t.rstrip().endswith("```"):
                 t = t.rstrip()[:-3]
         return t.strip() + "\n"
+
+    def _retry_feedback_note(self, task):
+        feedback = (task.get("_verify_feedback") or "").strip()
+        if not feedback:
+            return ""
+        return (
+            "\n\nThe previous attempt FAILED verification with:\n"
+            f"{feedback[:1200]}\n"
+            "Fix exactly this."
+        )
+
+    def _thinking_mode_for_task(self, task):
+        return normalize_thinking_mode(task.get("thinking_mode", self.config.get("thinking_mode")))
+
+    def _apply_thinking_mode(self, env, thinking_mode):
+        if thinking_mode == "off":
+            env["CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING"] = "1"
+            env["CLAUDE_CODE_DISABLE_THINKING"] = "1"
+        elif thinking_mode == "auto":
+            env["CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING"] = "0"
+            env["CLAUDE_CODE_DISABLE_THINKING"] = "1"
+        elif thinking_mode == "on":
+            env["CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING"] = "0"
+            env["CLAUDE_CODE_DISABLE_THINKING"] = "0"
+        else:
+            raise ValueError(f"Unsupported thinking_mode '{thinking_mode}'")
+        return env
+
+    def _agent_env(self, task):
+        env = os.environ.copy()
+        env.pop("VIRTUAL_ENV", None)
+        env.pop("PYTHONPATH", None)
+        env.pop("PYTHONHOME", None)
+        timeout_ms = str(int(self.config["task_timeout"] * 1000))
+        env.update({
+            "API_TIMEOUT_MS": timeout_ms,
+            "CLAUDE_STREAM_IDLE_TIMEOUT_MS": timeout_ms,
+            "CLAUDE_ENABLE_BYTE_WATCHDOG": "0",
+            "CLAUDE_ENABLE_STREAM_WATCHDOG": "0",
+        })
+        thinking_mode = self._thinking_mode_for_task(task)
+        self._apply_thinking_mode(env, thinking_mode)
+        return env
 
     def _post_chat(self, messages, max_tokens):
         body = json.dumps({"model": self.model_target, "messages": messages,
@@ -163,6 +206,7 @@ class Executor:
         if attempt > 1:
             user += ("\n\nNOTE: the previous attempt produced invalid/truncated code. "
                      "Produce the COMPLETE, syntactically valid file this time.")
+        user += self._retry_feedback_note(task)
         user += f"\n\nOutput ONLY the complete contents of {out_file}. No markdown fences, no commentary."
 
         messages = [
@@ -260,6 +304,8 @@ class Executor:
             sys_prompt += (f" IMPORTANT: {file or 'the file'} ALREADY contains partial work for this "
                            f"task from a previous run. CONTINUE and COMPLETE it — do not restart from "
                            f"scratch and do not duplicate code that is already there.")
+        sys_prompt += self._retry_feedback_note(task)
+        thinking_mode = self._thinking_mode_for_task(task)
         tools = task.get("tools") or self.config.get("agent_tools") or ["Read", "Edit"]
         permission_mode = normalize_permission_mode(task.get("permission_mode", self.config["permission_mode"]))
         cmd = ["ccr", "code", "-p", prompt, "--output-format", "json",
@@ -270,19 +316,7 @@ class Executor:
             cmd += ["--allowedTools", *tools]
         cmd += ["--disallowedTools", "Bash", "Glob", "Grep", "WebFetch", "Task"]
 
-        env = os.environ.copy()
-        env.pop("VIRTUAL_ENV", None)
-        env.pop("PYTHONPATH", None)
-        env.pop("PYTHONHOME", None)
-        timeout_ms = str(int(self.config["task_timeout"] * 1000))
-        env.update({
-            "API_TIMEOUT_MS": timeout_ms,
-            "CLAUDE_STREAM_IDLE_TIMEOUT_MS": timeout_ms,
-            "CLAUDE_ENABLE_BYTE_WATCHDOG": "0",
-            "CLAUDE_ENABLE_STREAM_WATCHDOG": "0",
-            "CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING": "1",
-            "CLAUDE_CODE_DISABLE_THINKING": "1",
-        })
+        env = self._agent_env(task)
 
         format_retries = int(self.config.get("agent_format_retries", 2))
         recovery_prompt = (
@@ -295,7 +329,7 @@ class Executor:
         self._dbg(
             f"AGENT INPUT · task {task.get('id')} · attempt {attempt} · resuming={resuming}",
             f"PROMPT:\n{prompt}\n\nAPPENDED SYSTEM PROMPT:\n{sys_prompt}\n\n"
-            f"ALLOWED TOOLS: {tools}\nPERMISSION_MODE: {permission_mode}\n"
+            f"ALLOWED TOOLS: {tools}\nPERMISSION_MODE: {permission_mode}\nTHINKING_MODE: {thinking_mode}\n"
             f"MAX_TURNS: {self.config['max_turns']}\n"
             f"(Claude Code's full base system prompt + tool defs + file reads are NOT shown here — "
             f"see headroom_traffic.jsonl for the literal on-wire prompt.)")
