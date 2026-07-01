@@ -9,7 +9,9 @@ A local stack for running a quantized LLM (Qwen3-27B) on Apple Silicon via **DFl
 This workspace lets you run **Claude Code locally** on your Mac in two ways:
 
 ### **1️⃣ Interactive Mode** (Development)
-Start DFlash, Headroom, and Claude Code in separate terminals. Manually write and test code with full editor privileges. **Perfect for exploring, prototyping, and debugging.**
+Start an inference backend + Headroom, then open Claude Code interactively.  
+The `bin/start_*_server.bash` scripts hand off server processes to run in the background, so you do **not** need dedicated long-running terminals just to keep inference/Headroom alive.  
+Separate terminals are mainly useful for the interactive Claude Code session and optional dashboard monitoring. **Perfect for exploring, prototyping, and debugging.**
 
 ```bash
 # Terminal 1
@@ -53,7 +55,7 @@ To monitor real-time metrics: `bin/launch_dashboard.bash`, `python -m llmstack.c
 ## Architecture
 
 ```
-Claude Code  →  ccr (Claude Code Router)  →  Headroom proxy :8789  →  DFlash server :8787  →  MLX / Apple GPU
+Claude Code  →  ccr (Claude Code Router)  →  Headroom proxy :8789  →  Inference server :8787 (DFlash/MLX/TurboQuant)  →  Apple GPU
 ```
 
 | Component | Port | Description |
@@ -62,7 +64,7 @@ Claude Code  →  ccr (Claude Code Router)  →  Headroom proxy :8789  →  DFla
 | Claude Code | - | Anthropic agentic coding assistant |
 | Claude Code Router (ccr) | — | Routes Claude Code requests to Headroom instead of Anthropic cloud |
 | Headroom proxy | `8789` | Proxy that compresses context in a code-aware manner before sending to DFlash |
-| DFlash server | `8787` | OpenAI-compatible server that runs the model with speculative decoding |
+| Inference server (DFlash/MLX/TurboQuant) | `8787` | OpenAI-compatible local inference endpoint selected from model registry |
 
 ---
 
@@ -81,10 +83,14 @@ Claude Code  →  ccr (Claude Code Router)  →  Headroom proxy :8789  →  DFla
 | File | Description |
 |---|---|
 | **Standalone Launchers** | |
-| `bin/start_dflash_server.bash` | Starts only the DFlash server (port 8787, logs output). Reads config from `llmstack_config.json`. |
-| `bin/start_headroom_server.bash` | Starts only the Headroom proxy (port 8789 → 8787, logs to `logs/headroom_traffic.jsonl`). Reads config from `llmstack_config.json`. |
-| `bin/stop_dflash_server.bash` | Stops the DFlash server bound to port `8787` (graceful stop with force fallback). |
-| `bin/stop_headroom_server.bash` | Stops the Headroom proxy bound to port `8789` (graceful stop with force fallback). |
+| `bin/start_dflash_server.bash` | Starts inference via `python -m llmstack.cli serve [model_name]` (DFlash model by default). Inference binds to `127.0.0.1:8787` and is managed in background by the service layer. |
+| `bin/start_mlx_server.bash` | Starts inference on backend type `mlx` (default model: `mlx-gemma4-12b`, override with first arg). Binds to `127.0.0.1:8787`. |
+| `bin/start_turboquant_server.bash` | Starts inference on backend type `turboquant` (default model: `turboquant-qwen35b-moe`, override with first arg). Binds to `127.0.0.1:8787`. |
+| `bin/start_headroom_server.bash` | Starts only the Headroom proxy on `127.0.0.1:8789` (upstream `:8787`, logs to `logs/headroom_traffic.jsonl`). Managed in background by the service layer. |
+| `bin/stop_dflash_server.bash` | Stops whichever inference process is bound to port `8787` (graceful stop with force-kill fallback). |
+| `bin/stop_mlx_server.bash` | Stops whichever inference process is bound to port `8787` (graceful stop with force-kill fallback). |
+| `bin/stop_turboquant_server.bash` | Stops whichever inference process is bound to port `8787` (graceful stop with force-kill fallback). |
+| `bin/stop_headroom_server.bash` | Stops Headroom on port `8789` (graceful stop with force-kill fallback, plus stale-process safety net). |
 | `bin/launch_ccr.bash` | **Interactive Claude Code** — starts `ccr code` with `acceptEdits` by default, pre-trusted folders, optimized system prompt. Changes to project folder (`dev_root` from config). Reads config from `llmstack_config.json`. |
 | `bin/launch_dashboard.bash` | Launches the terminal monitoring dashboard (TPS, cache %, memory, requests). Requires DFlash + Headroom running. |
 | **Autonomous Mode** | |
@@ -112,19 +118,19 @@ Use this to **manually code** with full Claude Code privileges, no automation.
 
 #### 1a. Start the infrastructure (one-time setup)
 
-In **Terminal 1**:
+From your current terminal (or separate terminals if you prefer):
 ```bash
 cd ~/local-llm-workspace
 bash bin/start_dflash_server.bash
 ```
-Waits for model to load (~5–10 min on first run). Output → `logs/dflash_server.log`.
+Waits for model to load (~5–10 min on first run), then leaves the inference server managed in the background on `:8787`. Output → `logs/dflash_server.log`.
 
-In **Terminal 2** (after DFlash is online):
+Then start Headroom:
 ```bash
 cd ~/local-llm-workspace
 bash bin/start_headroom_server.bash
 ```
-Starts compression proxy on `:8789`. Output → `logs/headroom.log` + `logs/headroom_traffic.jsonl`.
+Starts compression proxy on `:8789` (upstream `:8787`) and leaves it managed in the background. Output → `logs/headroom.log` + `logs/headroom_traffic.jsonl`.
 
 #### 1b. Start interactive Claude Code
 
@@ -449,17 +455,15 @@ If any gate fails, the task is rolled back and retried.
 ### In 60 Seconds: Interactive Mode
 
 ```bash
-# Terminal 1: Start DFlash
+# Start inference backend on :8787 (runs in background after startup)
 bash bin/start_dflash_server.bash
-# (wait for "✅ DFlash running...")
+# (or: bash bin/start_mlx_server.bash / bash bin/start_turboquant_server.bash)
 
-# Terminal 2: Start Headroom
+# Start Headroom on :8789 (runs in background after startup)
 bash bin/start_headroom_server.bash
-# (wait for "✅ Headroom proxy on :8789...")
 
-# Terminal 3: Start Claude Code (interactive)
+# Start Claude Code interactive session (this terminal is interactive)
 bash bin/launch_ccr.bash
-# (now type your request)
 ```
 
 ### In 5 Minutes: Autonomous Mode (Ralph)
@@ -502,27 +506,77 @@ bash bin/launch_ralph.bash
 
 ## Model Configuration
 
-- **Primary model**: `mlx-community/Qwen3.6-27B-4bit` (27B parameters, 4-bit quantized, ~8 GB VRAM)
-- **Draft model** (speculative decoding): `z-lab/Qwen3.6-27B-DFlash` (speeds up primary model with drafts)
-- **Server listening on**: `127.0.0.1:8787` (localhost only, no remote access)
+- Model/backend selection is **registry-driven** from `llmstack_config.json` (`active_model` + `models` map), loaded by `llmstack/models/registry.py`.
+- The active model resolves to a backend type and target model; supported backend types are:
+  - `dflash`
+  - `mlx`
+  - `turboquant`
+- All inference backends serve on `127.0.0.1:8787`; Headroom serves on `127.0.0.1:8789`.
 
-### DFlash Server Parameters (hardcoded in `llmstack/services/stack.py`)
+### Model selection commands
 
-The server is launched with these parameters (see `DEFAULT_DFLASH_CMD`):
+```bash
+# Show configured models and current active model
+python -m llmstack.cli model list
 
-| Parameter | Value | Purpose |
-|---|---|---|
-| `--model` | `mlx-community/Qwen3.6-27B-4bit` | Main model to run |
-| `--draft-model` | `z-lab/Qwen3.6-27B-DFlash` | Draft model for speculative decoding (speeds up generation) |
-| `--host` | `127.0.0.1` | Listen on localhost only |
-| `--port` | `8787` | OpenAI-compatible API port |
-| `--verify-mode` | `adaptive` | Use adaptive verification for speculative decoding |
-| `--temp` | `0.2` | Low temperature for deterministic code generation |
-| `--max-tokens` | `8192` | Max tokens per response |
-| `--prefix-cache-max-entries` | `64` | Max KV cache entries |
-| `--prefix-cache-max-bytes` | `12GB` | Max KV cache size |
-| `--max-snapshot-tokens` | `16000` | Snapshot size for cache persistence |
-| `--no-clear-cache-boundaries` | (flag) | Preserve cache across requests |
+# Switch active model (persists active_model in llmstack_config.json)
+python -m llmstack.cli model use mlx-gemma4-12b
+
+# Optional recommender
+python -m llmstack.cli model recommend --use agentic
+python -m llmstack.cli model recommend --use decode --apply
+```
+
+When `model use`/`recommend --apply` runs, llmstack syncs CCR and, if inference is already running on `:8787`, swaps it to the selected target model.
+
+### Serving a specific model/backend
+
+`python -m llmstack.cli serve [model_name]` accepts an optional model name. If provided and present in the registry, it updates `active_model`, syncs CCR, and serves that backend/model.
+
+Examples:
+
+```bash
+# Start default DFlash wrapper behavior (or pass a DFlash model name)
+bash bin/start_dflash_server.bash
+
+# Wrapper default is mlx-gemma4-12b unless you pass a model name
+bash bin/start_mlx_server.bash
+bash bin/start_mlx_server.bash mlx-gemma4-12b
+
+# Wrapper default is turboquant-qwen35b-moe unless overridden
+bash bin/start_turboquant_server.bash
+bash bin/start_turboquant_server.bash turboquant-qwen35b-moe
+```
+
+### CCR multi-model routing behavior
+
+`llmstack/services/ccr_service.py` renders CCR config from the full model registry (multi-provider/multi-model), and routes:
+
+- `default`
+- `background`
+- `think`
+- `longContext`
+- `webSearch`
+
+to the currently active `<provider>,<target>` pair, with provider endpoints pinned to local Headroom (`http://127.0.0.1:8789/v1/chat/completions`).
+
+### End-to-end switching examples
+
+```bash
+# Switch active model/backend first
+python -m llmstack.cli model use turboquant-qwen35b-moe
+
+# Then run interactive mode
+bash bin/launch_ccr.bash
+```
+
+```bash
+# Switch to MLX model/backend
+python -m llmstack.cli model use mlx-gemma4-12b
+
+# Then run autonomous Ralph mode
+bash bin/launch_ralph.bash
+```
 
 ---
 
