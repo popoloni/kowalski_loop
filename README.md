@@ -1,6 +1,6 @@
 # local-llm-workspace
 
-A local stack for running a quantized LLM (Qwen3-27B) on Apple Silicon via **DFlash/MLX**, with a compression proxy (**Headroom**), a Claude Code router (**ccr**), and an unattended supervisor (**Ralph**).
+A local stack for running a quantized LLM (Qwen3-27B, Qwen3-35B or Gemma4-12B) on Apple Silicon via **DFlash/TurboQuant/MLX** inference backend, with a compression proxy (**Headroom**), a Claude Code router (**ccr**), and an unattended supervisor (**Ralph**) driving **Claude Code** agent.
 
 ---
 
@@ -16,12 +16,12 @@ Separate terminals are mainly useful for the interactive Claude Code session and
 ```bash
 # Terminal 1
 bash bin/start_dflash_server.bash
-
-# Terminal 2  
 bash bin/start_headroom_server.bash
-
-# Terminal 3 (interactive)
+# (interactive)
 bash bin/launch_ccr.bash
+
+# Terminal 2
+bash bin/launch_dashboard.bash
 ```
 
 → See **[Mode 1: Standalone Interactive](#mode-1-standalone-interactive-development)** for details.
@@ -35,8 +35,12 @@ Write a plan (list of tasks), then Ralph automatically:
 - Commits only verified work
 
 ```bash
+# Terminal 1
 # Edit llmstack_config.json, create your plan, then:
 bash bin/launch_ralph.bash
+
+# Terminal 2
+bash bin/launch_dashboard.bash
 ```
 
 → See **[Mode 2: Autonomous Orchestration](#mode-2-autonomous-orchestration-ralph-loop)** for details.
