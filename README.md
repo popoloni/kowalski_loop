@@ -1231,6 +1231,11 @@ Priority ordering still applies, so higher-priority tasks are presented first.
 ## References
 
 - [MLX Documentation](https://github.com/ml-explore/mlx)
-- [Claude Code](https://docs.anthropic.com/claude-code)
-- [DFlash Speculative Decoding](https://huggingface.co/papers/2311.08629)
-- [Headroom Compression](https://github.com/musistudio/headroom)
+- [Claude Code Documentation](https://docs.anthropic.com/claude-code)
+- [DFlash Speculative Decoding - Article](https://arxiv.org/abs/2602.06036)
+- [TurboQuant: Online Vector Quantization with Near-optimal Distortion Rate - Article](https://arxiv.org/abs/2504.19874)
+- [Dflash Server](https://github.com/z-lab/dflash)
+- [TurboQuant MLX](https://github.com/arozanov/turboquant-mlx)
+- [TurboQuant MLX full](https://github.com/matt-k-wong/turboquant-mlx-full)
+- [TurboQuant Plus](https://github.com/TheTom/turboquant_plus)
+- [Headroom Compression](https://github.com/headroomlabs-ai/headroom)
