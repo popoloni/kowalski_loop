@@ -1438,6 +1438,11 @@ Priority ordering still applies, so higher-priority tasks are presented first.
 
 ## References
 
+### My Medium article on Kowalski: 
+ - [The Ultimate Local AI Setup Guide for Apple Silicon using DFlash](https://medium.com/@enrico.papalini/the-ultimate-local-ai-setup-guide-for-apple-silicon-using-dflash-62b547f91dc0)
+ - [From “It Runs” to “It Builds While You Sleep”](https://medium.com/@enrico.papalini/from-it-runs-to-it-builds-while-you-sleep-1a586dcf21be)
+
+### Official references and documentation:
 - [MLX Documentation](https://github.com/ml-explore/mlx)
 - [Claude Code Documentation](https://docs.anthropic.com/claude-code)
 - [DFlash Speculative Decoding - Article](https://arxiv.org/abs/2602.06036)
