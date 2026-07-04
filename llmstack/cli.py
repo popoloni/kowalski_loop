@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import signal
 import subprocess
 import sys
 
@@ -240,6 +241,62 @@ def _save_raw_user_config(raw_cfg, config_path=CONFIG_PATH):
         json.dump(raw_cfg, f, indent=2)
 
 
+def _watchdog_pid_file(config):
+    return os.path.join(config.get("log_dir", "logs"), "inference_watchdog.pid")
+
+
+def _pid_cmdline(pid):
+    try:
+        return subprocess.check_output(["ps", "-ww", "-p", str(pid), "-o", "command="], text=True).strip()
+    except Exception:
+        return ""
+
+
+def _is_watchdog_pid_active(pid):
+    cmdline = _pid_cmdline(pid)
+    return "-m llmstack.cli serve --watchdog" in cmdline
+
+
+def _active_watchdog_pid(config):
+    pid_file = _watchdog_pid_file(config)
+    try:
+        with open(pid_file, encoding="utf-8") as f:
+            pid = int((f.read() or "").strip())
+    except Exception:
+        return None
+
+    if _is_watchdog_pid_active(pid):
+        return pid
+
+    try:
+        os.remove(pid_file)
+    except FileNotFoundError:
+        pass
+    except Exception:
+        pass
+    return None
+
+
+def _write_watchdog_pid(config):
+    pid_file = _watchdog_pid_file(config)
+    os.makedirs(os.path.dirname(pid_file), exist_ok=True)
+    with open(pid_file, "w", encoding="utf-8") as f:
+        f.write(str(os.getpid()))
+        f.write("\n")
+
+
+def _clear_watchdog_pid(config):
+    pid_file = _watchdog_pid_file(config)
+    try:
+        if os.path.exists(pid_file):
+            with open(pid_file, encoding="utf-8") as f:
+                owner_pid = int((f.read() or "").strip())
+            if owner_pid == os.getpid():
+                os.remove(pid_file)
+    except Exception:
+        pass
+
+
 def _sync_ccr_for_active_model(config, restart=False):
     active_model, backend, registry = load_active_backend(config)
     timeout_ms = int(config["task_timeout"] * 1000)
@@ -272,8 +329,16 @@ def _restart_inference_server_if_running(config):
 
 
 def run_dflash(config, args):
-    extra = args.extra or []
-    model_name = extra[0] if extra and not extra[0].startswith("-") else None
+    extra = list(args.extra or [])
+    watchdog = False
+    filtered = []
+    for token in extra:
+        if token == "--watchdog":
+            watchdog = True
+        else:
+            filtered.append(token)
+
+    model_name = filtered[0] if filtered and not filtered[0].startswith("-") else None
     if model_name:
         registry = load_model_registry(config)
         if model_name not in registry:
@@ -287,8 +352,40 @@ def run_dflash(config, args):
         config["active_model"] = model_name
         print(f"🔧 [llmstack] active_model -> {model_name}")
         _sync_ccr_for_active_model(config, restart=True)
-    service = ServiceStack(config).dflash
-    service.ensure_running()
+    if watchdog:
+        stack = ServiceStack(config)
+        service = stack.dflash
+
+        def _handle_watchdog_signal(*_):
+            _clear_watchdog_pid(config)
+            service._stop = True
+            raise SystemExit(0)
+
+        try:
+            signal.signal(signal.SIGINT, _handle_watchdog_signal)
+            signal.signal(signal.SIGTERM, _handle_watchdog_signal)
+        except Exception:
+            pass
+
+        service.ensure_running()
+
+        existing_pid = _active_watchdog_pid(config)
+        if existing_pid and existing_pid != os.getpid():
+            print(f"ℹ️  [llmstack] Watchdog already active (PID {existing_pid}); skipping duplicate.")
+            return 0
+
+        _write_watchdog_pid(config)
+
+        poll_seconds = float(config.get("dflash_watchdog_poll_seconds", 5))
+        fail_threshold = int(config.get("dflash_watchdog_fail_threshold", 3))
+        try:
+            service.watchdog_loop(poll_seconds=poll_seconds, fail_threshold=fail_threshold)
+        finally:
+            _clear_watchdog_pid(config)
+    else:
+        service = ServiceStack(config).dflash
+        service.ensure_running()
+
     return 0
 
 
@@ -412,9 +509,15 @@ def _recommend_model(registry, use_case, ram_gb):
 
 def run_model(config, args):
     extra = args.extra or []
+    preset_values = {"performance", "balanced", "stable", "safest"}
 
     if not extra or extra[0] in ("help", "-h", "--help"):
-        print("Usage: llmstack model list | llmstack model use <name> | llmstack model recommend --use agentic|decode [--apply]")
+        print(
+            "Usage: llmstack model list | llmstack model use <name> | "
+            "llmstack model recommend --use agentic|decode [--apply] | "
+            "llmstack model preset <performance|balanced|stable|safest> "
+            "[--restart] [--keep-backend-overrides]"
+        )
         return 0
 
     registry = load_model_registry(config)
@@ -496,6 +599,58 @@ def run_model(config, args):
             _restart_inference_server_if_running(config)
         else:
             print("ℹ️  Add --apply to persist active_model and sync+restart CCR.")
+        return 0
+
+    if sub == "preset":
+        if len(extra) < 2:
+            print("❌ [llmstack] Missing preset name.")
+            print("   Usage: llmstack model preset <performance|balanced|stable|safest> "
+                  "[--restart] [--keep-backend-overrides]")
+            return 1
+
+        preset_name = str(extra[1] or "").strip().lower()
+        if preset_name not in preset_values:
+            print(f"❌ [llmstack] Invalid preset '{preset_name}'.")
+            print("   Allowed values: performance, balanced, stable, safest")
+            return 1
+
+        restart = "--restart" in extra[2:]
+        keep_backend_overrides = "--keep-backend-overrides" in extra[2:]
+        unknown_flags = [t for t in extra[2:] if t not in ("--restart", "--keep-backend-overrides")]
+        if unknown_flags:
+            print(f"❌ [llmstack] Unknown preset option(s): {' '.join(unknown_flags)}")
+            return 1
+
+        raw_cfg = _load_raw_user_config()
+        raw_cfg["backend_stability_profile"] = preset_name
+        if "backend_stability_overrides" not in raw_cfg:
+            raw_cfg["backend_stability_overrides"] = {}
+
+        # Keep one-knob behavior by default: clear backend-specific profile locks.
+        if not keep_backend_overrides:
+            raw_cfg["dflash_stability_profile"] = None
+            raw_cfg["mlx_stability_profile"] = None
+            raw_cfg["turboquant_stability_profile"] = None
+
+        _save_raw_user_config(raw_cfg)
+
+        config["backend_stability_profile"] = preset_name
+        if not keep_backend_overrides:
+            config["dflash_stability_profile"] = None
+            config["mlx_stability_profile"] = None
+            config["turboquant_stability_profile"] = None
+
+        print(f"🎛️  [llmstack] backend_stability_profile -> {preset_name}")
+        if keep_backend_overrides:
+            print("ℹ️  [llmstack] Backend-specific profile overrides were preserved.")
+        else:
+            print("ℹ️  [llmstack] Backend-specific profile overrides cleared (single-knob mode).")
+
+        if restart:
+            _restart_inference_server_if_running(config)
+            print("✅ [llmstack] Running inference server (if any) restarted with new preset.")
+        else:
+            print("ℹ️  Add --restart to apply immediately to a running server.")
         return 0
 
     print(f"❌ [llmstack] Unknown model subcommand '{sub}'.")

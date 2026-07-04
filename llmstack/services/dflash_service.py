@@ -3,6 +3,7 @@ import os
 import signal
 import subprocess
 import time
+import urllib.request
 
 from .manager import ServiceManager
 from .inference_probe import served_model_id
@@ -55,6 +56,7 @@ class DFlashService(ServiceManager):
         time.sleep(1)
 
     def ensure_running(self):
+        self._stop = False
         if self.server_process and self.server_process.poll() is None:
             return
         expected = self.backend.model_target()
@@ -91,10 +93,53 @@ class DFlashService(ServiceManager):
         print("♻️  [Kowalski] Hard-restarting DFlash...")
         self.stop()
         time.sleep(3)
+        self._stop = False
         self.start()
 
     def start(self):
+        self._stop = False
         self.ensure_running()
+
+    def watchdog_loop(self, poll_seconds=5, fail_threshold=3):
+        interval = max(1.0, float(poll_seconds or 5))
+        fail_threshold = max(1, int(fail_threshold or 3))
+        max_backoff = max(interval, 60.0)
+        restart_backoff = interval
+        health_fails = 0
+        print(
+            f"🛡️  [Kowalski] DFlash watchdog active "
+            f"(poll={interval:.1f}s, fail-threshold={fail_threshold})."
+        )
+        self._stop = False
+        while not self._stop:
+            process_died = bool(self.server_process and self.server_process.poll() is not None)
+            healthy = self._ping()
+
+            if process_died:
+                should_restart = True
+                reason = "process exited"
+            else:
+                if healthy:
+                    health_fails = 0
+                    should_restart = False
+                else:
+                    health_fails += 1
+                    should_restart = health_fails >= fail_threshold
+                    reason = f"health check failed {health_fails}/{fail_threshold}"
+
+            if should_restart:
+                print(f"🔥 [Kowalski] DFlash unhealthy ({reason}) — restarting...")
+                try:
+                    self.restart()
+                    health_fails = 0
+                    restart_backoff = interval
+                except Exception as exc:
+                    print(f"⚠️  [Kowalski] DFlash restart failed: {exc}")
+                    print(f"⏳ [Kowalski] Backing off {restart_backoff:.1f}s before next restart attempt.")
+                    time.sleep(restart_backoff)
+                    restart_backoff = min(max_backoff, restart_backoff * 2.0)
+                    continue
+            time.sleep(interval)
 
     def stop(self):
         self._stop = True

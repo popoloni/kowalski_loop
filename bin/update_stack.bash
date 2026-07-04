@@ -41,7 +41,8 @@ echo "\n🐍 Workspace Python env (${ENV_DIR})"
 if [[ -x "${ENV_DIR}/bin/python" ]]; then
 	run "${ENV_DIR}/bin/python" -m pip install -U pip setuptools wheel
 	# Core local inference/runtime packages used by this workspace.
-	run "${ENV_DIR}/bin/python" -m pip install -U dflash-mlx mlx-lm transformers rich psutil httpx
+	# Keep aligned with INSTALL.md dependencies.
+	run "${ENV_DIR}/bin/python" -m pip install -U dflash-mlx turboquant-mlx-full mlx-lm transformers rich psutil httpx "huggingface_hub[cli]"
 	run "${ENV_DIR}/bin/python" "${ROOT_DIR}/bin/patch_dflash_mlx.py"
 else
 	echo "⚠️  Workspace env not found at ${ENV_DIR}: skipping Python package refresh"

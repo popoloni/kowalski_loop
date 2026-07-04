@@ -1,58 +1,202 @@
-# local-llm-workspace
+# Kowalski Loop
 
 A local stack for running a quantized LLM (Qwen3-27B, Qwen3-35B or Gemma4-12B) on Apple Silicon via **DFlash/TurboQuant/MLX** inference backend, with a compression proxy (**Headroom**), a Claude Code router (**ccr**), and an unattended supervisor (**Kowalski**) driving **Claude Code** agent.
 
+Default installation folder in examples: `~/local-llm-workspace` (folder name only; project name is **Kowalski Loop**).
+
 ---
 
-## ⚡ Quick Intro
+## 🚀 Quick Start
 
-This workspace lets you run **Claude Code locally** on your Mac in two ways:
+Practical recipes first — every step is explained in depth later in this document.
 
-### **1️⃣ Interactive Mode** (Development)
-Start an inference backend + Headroom, then open Claude Code interactively.  
-The `bin/start_*_server.bash` scripts hand off server processes to run in the background, so you do **not** need dedicated long-running terminals just to keep inference/Headroom alive.  
-Separate terminals are mainly useful for the interactive Claude Code session and optional dashboard monitoring. **Perfect for exploring, prototyping, and debugging.**
+### 1. Interactive mode in 60 seconds (attended)
+
+Manual coding with Claude Code running on your local model.
 
 ```bash
-# Terminal 1
-bash bin/start_dflash_server.bash
-bash bin/start_headroom_server.bash
-# (interactive)
-bash bin/launch_ccr.bash
+# Terminal 1 — start the stack (wrapper scripts, recommended)
+bash bin/start_dflash_server.bash     # inference watchdog on :8787
+# (or: bash bin/start_mlx_server.bash / bash bin/start_turboquant_server.bash)
+bash bin/start_headroom_server.bash   # compression proxy on :8789
+bash bin/launch_ccr.bash              # interactive Claude Code session
 
-# Terminal 2
+# Terminal 2 — optional live monitoring
 bash bin/launch_dashboard.bash
 ```
 
-→ See **[Mode 1: Standalone Interactive](#mode-1-standalone-interactive-development)** for details.
-
-### **2️⃣ Autonomous Mode** (Kowalski Orchestrator)
-Write a plan (list of tasks), then Kowalski automatically:
-- Decomposes complex goals into atomic steps
-- Routes each task to Claude Code (multi-turn agent)
-- Verifies every change (syntax, markers, smoke tests, git checkpoints)
-- Resumes on timeout or failure
-- Commits only verified work
+Equivalent direct CLI (same flow, explicit parameters):
 
 ```bash
-# Terminal 1
-# Edit llmstack_config.json, create your plan, then:
+python -m llmstack.cli serve dflash-qwen35b-moe --watchdog
+python -m llmstack.cli proxy
+python -m llmstack.cli interactive
+```
+
+→ Full walkthrough: [Mode 1: Standalone Interactive](#mode-1-standalone-interactive-development)
+
+### 2. Autonomous mode in 5 minutes (Kowalski loop, unattended)
+
+Write a plan; Kowalski decomposes, executes, verifies, and commits.
+
+```bash
+# 1. Prepare your project
+cd ~/local-llm-workspace
+mkdir -p prj/my_project
+cd prj/my_project
+git init
+
+# 2. Create a task plan
+mkdir -p .claude/plans
+cat > .claude/plans/plan.json <<'EOF'
+{
+  "tasks": [
+    {
+      "id": "task_01",
+      "prompt": "Create index.html with a button that says 'Click me'",
+      "file": "index.html",
+      "expect": ["Click me"]
+    },
+    {
+      "id": "task_02",
+      "prompt": "Add JavaScript to log 'Button clicked' when clicked",
+      "file": "script.js",
+      "context": ["index.html"],
+      "verify": "node --check script.js"
+    }
+  ]
+}
+EOF
+
+# 3. Update llmstack_config.json (required)
+cd ~/local-llm-workspace
+env/bin/python - <<'PY'
+import json
+from pathlib import Path
+
+cfg_path = Path("llmstack_config.json")
+cfg = json.loads(cfg_path.read_text())
+cfg["dev_root"] = "./prj/my_project"
+cfg["plan_file"] = "./prj/my_project/.claude/plans/plan.json"
+cfg.setdefault("active_model", "dflash-qwen27b")
+cfg_path.write_text(json.dumps(cfg, indent=2) + "\n")
+print("Updated", cfg_path)
+PY
+
+# 4. Run Kowalski
 bash bin/launch_kowalski.bash
 
-# Terminal 2
+# Terminal 2 — optional live monitoring
 bash bin/launch_dashboard.bash
 ```
 
-→ See **[Mode 2: Autonomous Orchestration](#mode-2-autonomous-orchestration-kowalski-loop)** for details.
+→ Full walkthrough: [Mode 2: Autonomous Orchestration (Kowalski Loop)](#mode-2-autonomous-orchestration-kowalski-loop)
 
-### **Choose Your Mode:**
+### 3. Bootstrap a new workspace (wizard)
 
-| Need | Mode | Command |
+Use the interactive wizard when you want a minimal starter config and an optional first plan:
+
+```bash
+python -m llmstack.cli init
+```
+
+The wizard asks for:
+- `dev_root`
+- project type
+- goal
+- model/backend preference
+- whether to generate a starter plan immediately
+
+It writes a compact `llmstack_config.json` with stable keys only, derives a starter plan path under `./.claude/plans/`, and optionally calls `build_plan.py` for the provided goal. The generated config records `project_type`, a `project_template` block (`name`, `language`, `description`, `starter_layout`, `plan_name`), and the chosen `project_goal` alongside the usual `dev_root`, `active_model`, `plan_file`, `loop_mode`, `permission_mode`, `thinking_mode`, and `verification_plugins` keys.
+
+Useful flag:
+- `--force` overwrites an existing `llmstack_config.json`. It works both interactively and combined with the scriptable flags (e.g. `llmstack init --force --non-interactive ...`).
+
+Scriptable mode:
+- `--non-interactive` skips prompts and uses defaults or the values you pass.
+- `--dev-root`, `--project-type`, `--goal`, and `--model` let you pin the generated config.
+- `--bootstrap-plan` or `--no-bootstrap-plan` control whether a starter plan is generated.
+
+Supported starter templates:
+- `python` creates a Python-oriented config with `pyproject.toml`, `src/`, and `tests/` in the template metadata.
+- `js` creates a JavaScript-oriented config with `package.json`, `src/`, and `tests/`.
+- `generic` keeps the template language-agnostic.
+
+### Which mode do I need?
+
+| Need | Mode | Entry points |
 |------|------|---------|
-| Explore & debug interactively | **Interactive (attended)** | `bin/launch_ccr.bash`, `python -m llmstack.cli interactive` |
-| Automate a build plan with verification | **Kowalski (unattended)** | `bin/launch_kowalski.bash`, `python -m llmstack.cli run` |
+| Explore and debug interactively | **Interactive (attended)** | `bin/launch_ccr.bash` or `python -m llmstack.cli interactive` |
+| Automate a build plan with verification | **Kowalski (unattended)** | `bin/launch_kowalski.bash` or `python -m llmstack.cli run` |
 
-To monitor real-time metrics: `bin/launch_dashboard.bash`, `python -m llmstack.cli dashboard` in another terminal window.
+To monitor real-time metrics, run `bin/launch_dashboard.bash` or `python -m llmstack.cli dashboard` in another terminal.
+
+### Reading path (progressively deeper)
+
+1. [Quick Start](#-quick-start) — you are here.
+2. [Operating the Stack](#operating-the-stack) — wrappers vs direct CLI, stability levels.
+3. [How to Run](#how-to-run) — step-by-step walkthroughs for both modes.
+4. [Model Configuration](#model-configuration) — model/backend switching and stability presets in depth.
+5. Advanced references — [Kowalski Configuration](#advanced-reference-kowalski-configuration-llmstack_configjson), [Task Schema](#advanced-reference-task-schema-plan-json), [Executor Selection](#advanced-reference-executor-selection), [Loop Modes](#loop-modes).
+
+---
+
+## Operating the Stack
+
+### 1) Wrapper-first workflow (recommended)
+
+Start with wrapper scripts in `bin/`:
+
+- `start_*_server.bash` wrappers run inference through a watchdog (`llmstack.cli serve --watchdog`) and keep one backend on `:8787` alive.
+- `start_headroom_server.bash` is resilient (health-first/idempotent start, anti-concurrent lock, stale cleanup, retry with backoff).
+- `launch_ccr.bash`, `launch_kowalski.bash`, and `launch_dashboard.bash` provide the standard attended/unattended workflows.
+
+This is the default path for interactive development and predictable operations.
+
+### 2) Direct CLI workflow (explicit parameters)
+
+When you need full control, run the CLI directly, for example:
+
+- `python -m llmstack.cli serve [model_name] --watchdog`
+- `python -m llmstack.cli proxy`
+- `python -m llmstack.cli interactive`
+- `python -m llmstack.cli run`
+- `python -m llmstack.cli model use <name>`
+- `python -m llmstack.cli model preset <performance|balanced|stable|safest> [--restart] [--keep-backend-overrides]`
+
+Precedence rule:
+
+- If you pass an option explicitly on the CLI, that explicit option wins for that command.
+- If you do not pass an override on the CLI, global values from `llmstack_config.json` are used.
+
+### 3) Stability levels at a glance
+
+Use one global knob (`backend_stability_profile`) unless you explicitly need per-backend differences.
+
+| Level | Best for | Trade-off | Typical outcome |
+|---|---|---|---|
+| `performance` | Maximum throughput, short prompts, benchmarking | Highest GPU pressure | Fastest responses, higher crash risk on large contexts |
+| `balanced` | Daily use with mixed workloads | Moderate limits | Good speed with decent stability |
+| `stable` | Long coding sessions and large contexts | Slightly reduced peak throughput | Better resilience on Apple GPU under load |
+| `safest` | Critical reliability sessions, very large prompts | Stronger throttling and caps | Lowest crash probability, slowest peak throughput |
+
+Recommended progression:
+1. Start with `balanced`.
+2. Move to `stable` if you observe runtime instability.
+3. Use `safest` for mission-critical unattended runs.
+4. Return to `performance` only when prompt sizes are controlled.
+
+Quick commands:
+
+```bash
+# Global one-knob preset for all backends
+python -m llmstack.cli model preset stable
+
+# Apply preset and restart the running inference service immediately
+python -m llmstack.cli model preset safest --restart
+```
+
+Full details: [Backend stability presets (all backends)](#backend-stability-presets-all-backends).
 
 ---
 
@@ -80,6 +224,22 @@ Claude Code  →  ccr (Claude Code Router)  →  Headroom proxy :8789  →  Infe
 - [Headroom](https://github.com/musistudio/headroom) installed in `~/headroom-env/`
 - Python virtualenv in `./env/` with `dflash-mlx` and dependencies (already included)
 
+### Model Artifacts (Required)
+
+No model weights are distributed with this repository.
+
+- `llmstack` can provide a default in-code registry when `models` is omitted, but it still points to remote Hugging Face repos.
+- The first serve run downloads target weights automatically if missing.
+- DFlash setups also require the matching draft model (`draft`), which may be gated.
+
+Recommended before first run:
+
+1. Authenticate to Hugging Face (`hf auth login`) with a token that can access the required repos.
+2. Pre-download gated drafts to avoid startup timeout on first serve (example: `hf download z-lab/Qwen3.6-27B-DFlash`).
+3. Ensure every configured `target` (and `draft` for DFlash) exists and is accessible.
+
+Reference walkthrough (installation article): [docs/medium_article_01_install.md](docs/medium_article_01_install.md).
+
 ---
 
 ## File Structure
@@ -87,16 +247,16 @@ Claude Code  →  ccr (Claude Code Router)  →  Headroom proxy :8789  →  Infe
 | File | Description |
 |---|---|
 | **Standalone Launchers** | |
-| `bin/start_dflash_server.bash` | Starts inference via `python -m llmstack.cli serve [model_name]` (DFlash model by default). Inference binds to `127.0.0.1:8787` and is managed in background by the service layer. |
-| `bin/start_mlx_server.bash` | Starts inference on backend type `mlx` (default model: `mlx-gemma4-12b`, override with first arg). Binds to `127.0.0.1:8787`. |
-| `bin/start_turboquant_server.bash` | Starts inference on backend type `turboquant` (default model: `turboquant-qwen35b-moe`, override with first arg). Binds to `127.0.0.1:8787`. |
-| `bin/start_headroom_server.bash` | Starts only the Headroom proxy on `127.0.0.1:8789` (upstream `:8787`, logs to `logs/headroom_traffic.jsonl`). Managed in background by the service layer. |
-| `bin/stop_dflash_server.bash` | Stops whichever inference process is bound to port `8787` (graceful stop with force-kill fallback). |
-| `bin/stop_mlx_server.bash` | Stops whichever inference process is bound to port `8787` (graceful stop with force-kill fallback). |
-| `bin/stop_turboquant_server.bash` | Stops whichever inference process is bound to port `8787` (graceful stop with force-kill fallback). |
+| `bin/start_dflash_server.bash` | Starts the inference watchdog in background for DFlash (`python -m llmstack.cli serve --watchdog`). Default model = active DFlash model unless overridden with first arg. Watchdog logs: `logs/dflash_watchdog.log`; server logs: `logs/dflash_server.log`. |
+| `bin/start_mlx_server.bash` | Starts the same inference watchdog in background for MLX (default model: `mlx-gemma4-12b`, override with first arg). Same `:8787` endpoint and log paths as above. |
+| `bin/start_turboquant_server.bash` | Starts the same inference watchdog in background for TurboQuant (default model: `turboquant-qwen35b-moe`, override with first arg). Same `:8787` endpoint and log paths as above. |
+| `bin/start_headroom_server.bash` | Starts only the Headroom proxy on `127.0.0.1:8789` (upstream `:8787`, logs to `logs/headroom_traffic.jsonl`). Resilient launcher: health-first/idempotent start, anti-concurrent lock, stale-process cleanup, and retry with backoff (`HEADROOM_START_RETRIES`, default `3`). |
+| `bin/stop_dflash_server.bash` | Stops the inference watchdog (if running) and then stops whichever inference process is bound to `8787` (graceful stop with force-kill fallback). |
+| `bin/stop_mlx_server.bash` | Stops the inference watchdog (if running) and then stops whichever inference process is bound to `8787` (graceful stop with force-kill fallback). |
+| `bin/stop_turboquant_server.bash` | Stops the inference watchdog (if running) and then stops whichever inference process is bound to `8787` (graceful stop with force-kill fallback). |
 | `bin/stop_headroom_server.bash` | Stops Headroom on port `8789` (graceful stop with force-kill fallback, plus stale-process safety net). |
 | `bin/launch_ccr.bash` | **Interactive Claude Code** — starts `ccr code` with `acceptEdits` by default, pre-trusted folders, optimized system prompt. Changes to project folder (`dev_root` from config). Reads config from `llmstack_config.json`. |
-| `bin/launch_dashboard.bash` | Launches the terminal monitoring dashboard (TPS, cache %, memory, requests). Requires DFlash + Headroom running. |
+| `bin/launch_dashboard.bash` | Launches the terminal monitoring dashboard (TPS, cache %, memory, requests, and live engine statuses). Header is intentionally compact: inference engine, inference status, served model, and Headroom status. The Headroom panel also shows its status. |
 | **Autonomous Mode** | |
 | `bin/launch_kowalski.bash` | **Main entry point** — thin shell wrapper around `python -m llmstack.cli run`. Starts the stack and runs Kowalski orchestrator. |
 | `llmstack/core/supervisor.py` | Core orchestrator used by `llmstack.cli run` to execute the autonomous loop. |
@@ -109,7 +269,7 @@ Claude Code  →  ccr (Claude Code Router)  →  Headroom proxy :8789  →  Infe
 | `bin/update_stack.bash` | Updates `claude` and `ccr` to the latest version via npm. |
 | `docs/commit_history.txt` | Text log of manual/project commit notes and migration checkpoints. |
 | **Projects & Environment** | |
-| `pacman_clone/` | Sample project managed by Kowalski (Pac-Man game in HTML/JS). Contains `.claude/` subfolder for plans. |
+| `prj/pacman_clone/` | Sample project managed by Kowalski (Pac-Man game in HTML/JS). Contains `.claude/` subfolder for plans. |
 | `env/` | Python virtualenv with dflash-mlx, mlx-lm, rich, psutil, and other dependencies. |
 
 ---
@@ -127,7 +287,7 @@ From your current terminal (or separate terminals if you prefer):
 cd ~/local-llm-workspace
 bash bin/start_dflash_server.bash
 ```
-Waits for model to load (~5–10 min on first run), then leaves the inference server managed in the background on `:8787`. Output → `logs/dflash_server.log`.
+Starts a background watchdog immediately. The model may still take ~5–10 min to become healthy on first run; follow progress in `logs/dflash_watchdog.log` and `logs/dflash_server.log`.
 
 Then start Headroom:
 ```bash
@@ -162,13 +322,21 @@ In **Terminal 4**:
 bash bin/launch_dashboard.bash
 ```
 
-Displays live metrics: TPS, cache hits, memory, recent requests.
+Displays live metrics: TPS, cache hits, memory, and recent requests, plus separate health states for the inference engine and the Headroom cache engine. The "Inference Completed" panel shows only the logged-call count (no log-file path).
 
 #### 1d. Stop infrastructure
 
 ```bash
 bash bin/stop_headroom_server.bash
 bash bin/stop_dflash_server.bash
+```
+
+If you started MLX or TurboQuant instead of DFlash, use the matching stop wrapper:
+
+```bash
+bash bin/stop_mlx_server.bash
+# or
+bash bin/stop_turboquant_server.bash
 ```
 
 ---
@@ -179,11 +347,12 @@ Use this to **automatically decompose a goal into tasks and execute them** with 
 
 #### 2a. Prepare your project folder
 
-Create a new project folder or use an existing one (default: `./pacman_clone`):
+Create a new project folder or use an existing one (default: `./prj/pacman_clone`):
 
 ```bash
-mkdir -p my_project
-cd my_project
+cd ~/local-llm-workspace
+mkdir -p prj/my_project
+cd prj/my_project
 # (optional) Initialize git
 git init
 ```
@@ -208,11 +377,11 @@ Review it, tweak any task if needed, then continue.
 
 **Option B: Write a plan manually** (advanced)
 
-Create a file at `my_project/.claude/plans/my_plan.json`:
+Create a file at `.claude/plans/my_plan.json` (from inside `prj/my_project`):
 
 ```bash
-mkdir -p my_project/.claude/plans
-cat > my_project/.claude/plans/my_plan.json <<'EOF'
+mkdir -p .claude/plans
+cat > .claude/plans/my_plan.json <<'EOF'
 {
   "tasks": [
     {
@@ -242,12 +411,17 @@ cat > my_project/.claude/plans/my_plan.json <<'EOF'
   ]
 }
 EOF
+```
+
+#### 2c. Configure Kowalski
+
 Edit `llmstack_config.json`:
 
 ```json
 {
-  "dev_root": "./my_project",
-  "plan_file": "./my_project/.claude/plans/my_plan.json",
+  "dev_root": "./prj/my_project",
+  "plan_file": "./prj/my_project/.claude/plans/my_plan.json",
+  "active_model": "dflash-qwen27b",
   "permission_mode": "acceptEdits",
   "max_turns": 150,
   "timeout_seconds": 3600,
@@ -258,6 +432,10 @@ Edit `llmstack_config.json`:
   "review_enabled": false
 }
 ```
+
+Model note:
+- Recommended: set `active_model` explicitly as shown above.
+- If omitted, Kowalski falls back to the first model in the configured registry.
 
 #### 2d. Start the autonomous loop
 
@@ -306,7 +484,7 @@ Kowalski will:
 ✅ [Kowalski] Task task_01 COMPLETE & verified.
 
 ▶️  [Kowalski] Task task_02 — attempt 1 (agent, turns=150)
-⚙️  [Kowalski] Running Task task_02 (agentic, turns=150) in /Users/enricopapalini/local-llm-workspace/my_project
+⚙️  [Kowalski] Running Task task_02 (agentic, turns=150) in /Users/enricopapalini/local-llm-workspace/prj/my_project
 ✅ [Kowalski] Task task_02 COMPLETE & verified.
 
 🎉 [Kowalski] All tasks verified and committed!
@@ -319,6 +497,7 @@ Kowalski will:
 #### Generate a new plan interactively
 
 ```bash
+cd ~/local-llm-workspace
 source env/bin/activate
 python3 -m llmstack.tools.build_plan "Implement a 2D physics engine"
 ```
@@ -332,12 +511,14 @@ bash bin/launch_dashboard.bash
 
 Clean logs (remove HTTP access lines):
 ```bash
+cd ~/local-llm-workspace
 source env/bin/activate
 python3 -m llmstack.tools.log_cleaner
 ```
 
 Generate timing charts for docs (writes `docs/img/*.png`):
 ```bash
+cd ~/local-llm-workspace
 source env/bin/activate
 python3 -m llmstack.tools.plot_timings
 ```
@@ -350,23 +531,200 @@ bash bin/update_stack.bash
 
 ---
 
-## Kowalski Configuration (`llmstack_config.json`)
+## Model Configuration
+
+- Model/backend selection is **registry-driven** from `llmstack_config.json` (`active_model` + `models` map), loaded by `llmstack/models/registry.py`.
+- The active model resolves to a backend type and target model; supported backend types are:
+  - `dflash`
+  - `mlx`
+  - `turboquant`
+- All inference backends serve on `127.0.0.1:8787`; Headroom serves on `127.0.0.1:8789`.
+
+### Model selection commands
+
+```bash
+# Show configured models and current active model
+python -m llmstack.cli model list
+
+# Switch active model (persists active_model in llmstack_config.json)
+python -m llmstack.cli model use mlx-gemma4-12b
+
+# Optional recommender
+python -m llmstack.cli model recommend --use agentic
+python -m llmstack.cli model recommend --use decode --apply
+
+# Set one global stability preset for all backends (single-knob mode)
+python -m llmstack.cli model preset stable
+
+# Apply preset and restart running inference server immediately
+python -m llmstack.cli model preset safest --restart
+```
+
+When `model use`/`recommend --apply` runs, llmstack syncs CCR and, if inference is already running on `:8787`, swaps it to the selected target model.
+
+### Serving a specific model/backend
+
+`python -m llmstack.cli serve [model_name] --watchdog` accepts an optional model name and can run in watchdog mode. If a model name is provided and present in the registry, it updates `active_model`, syncs CCR, and serves that backend/model.
+
+Examples:
+
+```bash
+# Start default DFlash wrapper behavior (watchdog mode)
+bash bin/start_dflash_server.bash
+
+# Wrapper default is mlx-gemma4-12b unless you pass a model name (watchdog mode)
+bash bin/start_mlx_server.bash
+bash bin/start_mlx_server.bash mlx-gemma4-12b
+
+# Wrapper default is turboquant-qwen35b-moe unless overridden (watchdog mode)
+bash bin/start_turboquant_server.bash
+bash bin/start_turboquant_server.bash turboquant-qwen35b-moe
+```
+
+Note: only one inference watchdog should run at a time because all backends bind to port `8787`. If a watchdog is already running, start wrappers will exit without launching a second one.
+
+### Backend stability presets (all backends)
+
+Observed hard-crash signature on Apple GPU is typically:
+- `[METAL] Command buffer execution failed: ... kIOGPUCommandBufferCallbackErrorImpactingInteractivity`
+
+This is a runtime/GPU-pressure failure (not a router/watchdog logic failure). To reduce crash probability under large contexts, llmstack now exposes stability knobs in `llmstack_config.json` for all backend types (`dflash`, `mlx`, `turboquant`):
+
+- `backend_stability_profile`: `performance` | `balanced` | `stable` | `safest`
+- `backend_stability_overrides`: optional per-key overrides
+
+Optional backend-specific overrides (take precedence over global):
+- `dflash_stability_profile` / `dflash_stability_overrides`
+- `mlx_stability_profile` / `mlx_stability_overrides`
+- `turboquant_stability_profile` / `turboquant_stability_overrides`
+
+If you want exactly one knob for everything, keep backend-specific `*_stability_profile` values `null` and set only `backend_stability_profile`.
+
+Profiles tune serve parameters per backend. Lower settings reduce peak memory and command-buffer stress, usually improving runtime stability at the cost of some throughput.
+
+How to choose in practice:
+
+1. If your stack is stable now, keep `balanced`.
+2. If you see intermittent failures tied to backend restarts, move to `stable`.
+3. If you hit Metal command-buffer failures under heavy context, move to `safest` first, then relax later.
+4. If you need maximum speed and can tolerate restarts, use `performance`.
+
+One-knob strategy (recommended):
+
+1. Set only `backend_stability_profile`.
+2. Keep `dflash_stability_profile`, `mlx_stability_profile`, and `turboquant_stability_profile` as `null`.
+3. Add minimal overrides only for measured bottlenecks.
+
+Per-backend strategy (advanced):
+
+1. Keep a global baseline (for example `stable`).
+2. Override only the backend that needs a different profile.
+3. Document why, so operational behavior remains predictable over time.
+
+Precedence:
+- model-local defaults
+- global `backend_stability_*`
+- backend-specific `*_stability_*` (highest)
+
+Example:
+
+```json
+{
+  "backend_stability_profile": "stable",
+  "backend_stability_overrides": {
+    "max_tokens": 3072,
+    "max_snapshot_tokens": 10000,
+    "cache_max_bytes": "8GB"
+  },
+  "turboquant_stability_overrides": {
+    "prompt_concurrency": 1,
+    "kv_min_tokens": 96
+  }
+}
+```
+
+### CCR multi-model routing behavior
+
+`llmstack/services/ccr_service.py` renders CCR config from the full model registry (multi-provider/multi-model), and routes:
+
+- `default`
+- `background`
+- `think`
+- `longContext`
+- `webSearch`
+
+to the currently active `<provider>,<target>` pair, with provider endpoints pinned to local Headroom (`http://127.0.0.1:8789/v1/chat/completions`).
+
+### End-to-end switching examples
+
+```bash
+# Switch active model/backend first
+python -m llmstack.cli model use turboquant-qwen35b-moe
+
+# Then run interactive mode
+bash bin/launch_ccr.bash
+```
+
+```bash
+# Switch to MLX model/backend
+python -m llmstack.cli model use mlx-gemma4-12b
+
+# Then run autonomous Kowalski mode
+bash bin/launch_kowalski.bash
+```
+
+---
+
+## Advanced Reference: Kowalski Configuration (`llmstack_config.json`)
 
 Complete reference of all available parameters:
 
 ```json
 {
-  "dev_root": "./pacman_clone",
-  "plan_file": "./pacman_clone/.claude/plans/pacman_plan.json",
+  "dev_root": "./prj/pacman_clone",
+  "plan_file": "./prj/pacman_clone/.claude/plans/pacman_plan.json",
   "log_dir": "./logs",
   "dflash_log": "./logs/dflash_server.log",
   "headroom_log": "./logs/headroom.log",
   "headroom_traffic_log": "./logs/headroom_traffic.jsonl",
   "timings_csv": "./logs/dflash_timings.csv",
+  "active_model": "dflash-qwen35b-moe",
+  "models": {
+    "dflash-qwen27b-dense": {
+      "type": "dflash",
+      "target": "mlx-community/Qwen3.6-27B-4bit",
+      "draft": "z-lab/Qwen3.6-27B-DFlash",
+      "max_tokens": 8192,
+      "temp": 0.2
+    },
+    "dflash-qwen35b-moe": {
+      "type": "dflash",
+      "target": "mlx-community/Qwen3.6-35B-A3B-4bit",
+      "draft": "z-lab/Qwen3.6-35B-A3B-DFlash",
+      "max_tokens": 8192,
+      "temp": 0.2
+    },
+    "turboquant-qwen35b-moe": {
+      "type": "turboquant",
+      "target": "manjunathshiva/Qwen3.6-35B-A3B-tq3-g32",
+      "kv_k_bits": 8,
+      "kv_v_bits": 3,
+      "max_tokens": 8192,
+      "temp": 0.2
+    }
+  },
   "permission_mode": "acceptEdits",
   "max_turns": 100,
   "timeout_seconds": 3600,
   "warmup_timeout_seconds": 120,
+  "backend_stability_profile": "balanced",
+  "backend_stability_overrides": {},
+  "dflash_stability_profile": null,
+  "dflash_stability_overrides": {},
+  "mlx_stability_profile": null,
+  "mlx_stability_overrides": {},
+  "turboquant_stability_profile": null,
+  "turboquant_stability_overrides": {},
   "max_retries": 3,
   "max_resumes": 8,
   "agent_format_retries": 2,
@@ -409,10 +767,22 @@ Complete reference of all available parameters:
 
 | Parameter | Type | Default | Possible Values | Description |
 |---|---|---|---|---|
-| **`dev_root`** | string | `"."` | Any valid directory path (relative or absolute) | Root directory where Claude Code operates. All file modifications and git operations are relative to this path. Example: `"./pacman_clone"`, `"."`, `"/absolute/path"` |
+| **`dev_root`** | string | `"."` | Any valid directory path (relative or absolute) | Root directory where Claude Code operates. All file modifications and git operations are relative to this path. Example: `"./prj/pacman_clone"`, `"."`, `"/absolute/path"` |
 | **`plan_file`** | string | `"plan.json"` | Any valid file path inside `dev_root` | Path to the JSON file containing the task list to execute sequentially. Loaded fresh on each run. Example: `"plan.json"`, `".claude/plans/main.json"` |
+| **`active_model`** | string | first registry key | Any model name present in `models` | Model used by serve/interactive/run when no model override is passed on CLI. Recommended to set explicitly for deterministic behavior across machines. |
+| **`models`** | object | in-code defaults | map of model name → backend config | Model registry. Each entry defines at least `type` + `target`; DFlash entries should also define `draft`. If omitted, Kowalski falls back to built-in defaults in `llmstack/models/registry.py`. |
+| **`backend_stability_profile`** | string | `"balanced"` | `"performance"` &#124; `"balanced"` &#124; `"stable"` &#124; `"safest"` | Global stability preset for all backends when backend-specific profile keys are `null`. |
+| **`backend_stability_overrides`** | object | `{}` | key/value map | Optional global overrides applied on top of the selected global stability preset. |
+| **`dflash_stability_profile`** | string/null | `null` | preset values or `null` | DFlash-specific profile override. `null` means: inherit from `backend_stability_profile`. |
+| **`mlx_stability_profile`** | string/null | `null` | preset values or `null` | MLX-specific profile override. `null` means: inherit from `backend_stability_profile`. |
+| **`turboquant_stability_profile`** | string/null | `null` | preset values or `null` | TurboQuant-specific profile override. `null` means: inherit from `backend_stability_profile`. |
 | **`permission_mode`** | string | `"acceptEdits"` | `"default"` &#124; `"acceptEdits"` &#124; `"plan"` &#124; `"auto"` &#124; `"dontAsk"` &#124; `"bypassPermissions"` | Claude Code permission mode for autonomous task execution. `acceptEdits` is recommended for local unattended development. |
 | **`agent_tools`** | array | `["Read", "Edit"]` | Any combination of: `"Read"`, `"Edit"`, `"Write"`, `"Bash"`, `"Glob"`, `"Grep"`, `"WebFetch"`, `"Task"` | Tools available to the Claude Code agent. Typically `["Read", "Edit"]` for safety. Add `"Bash"` for script execution. |
+
+CLI override precedence:
+
+- Explicit CLI parameters (for example `llmstack model preset ... --restart`) apply to that invocation.
+- If no CLI override is provided, values from `llmstack_config.json` are used.
 
 ### Timeout & Retry Parameters
 
@@ -578,169 +948,7 @@ Notes:
 
 ---
 
----
-
-## Quick Start Guide
-
-### In 60 Seconds: Interactive Mode
-
-```bash
-# Start inference backend on :8787 (runs in background after startup)
-bash bin/start_dflash_server.bash
-# (or: bash bin/start_mlx_server.bash / bash bin/start_turboquant_server.bash)
-
-# Start Headroom on :8789 (runs in background after startup)
-bash bin/start_headroom_server.bash
-
-# Start Claude Code interactive session (this terminal is interactive)
-bash bin/launch_ccr.bash
-```
-
-### In 5 Minutes: Autonomous Mode (Kowalski)
-
-```bash
-# 1. Prepare your project
-mkdir my_project
-cd my_project
-git init
-
-# 2. Create a task plan
-cat > my_project/.claude/plans/plan.json <<'EOF'
-{
-  "tasks": [
-    {
-      "id": "task_01",
-      "prompt": "Create index.html with a button that says 'Click me'",
-      "file": "index.html",
-      "expect": ["Click me"]
-    },
-    {
-      "id": "task_02",
-      "prompt": "Add JavaScript to log 'Button clicked' when clicked",
-      "file": "script.js",
-      "context": ["index.html"],
-      "verify": "node --check script.js"
-    }
-  ]
-}
-EOF
-
-# 3. Update Kowalski config
-# (edit llmstack_config.json: set dev_root to "./my_project" and plan_file path)
-
-# 4. Run Kowalski
-bash bin/launch_kowalski.bash
-```
-
-### Bootstrap a New Workspace
-
-Use the interactive wizard when you want a minimal starter config and an optional first plan:
-
-```bash
-python -m llmstack.cli init
-```
-
-The wizard asks for:
-- `dev_root`
-- project type
-- goal
-- model/backend preference
-- whether to generate a starter plan immediately
-
-It writes a compact `llmstack_config.json` with stable keys only, derives a starter plan path under `./.claude/plans/`, and optionally calls `build_plan.py` for the provided goal. The generated config records `project_type`, a `project_template` block (`name`, `language`, `description`, `starter_layout`, `plan_name`), and the chosen `project_goal` alongside the usual `dev_root`, `active_model`, `plan_file`, `loop_mode`, `permission_mode`, `thinking_mode`, and `verification_plugins` keys.
-
-Useful flag:
-- `--force` overwrites an existing `llmstack_config.json`. It works both interactively and combined with the scriptable flags (e.g. `llmstack init --force --non-interactive ...`).
-
-Scriptable mode:
-- `--non-interactive` skips prompts and uses defaults or the values you pass.
-- `--dev-root`, `--project-type`, `--goal`, and `--model` let you pin the generated config.
-- `--bootstrap-plan` or `--no-bootstrap-plan` control whether a starter plan is generated.
-
-Supported starter templates:
-- `python` creates a Python-oriented config with `pyproject.toml`, `src/`, and `tests/` in the template metadata.
-- `js` creates a JavaScript-oriented config with `package.json`, `src/`, and `tests/`.
-- `generic` keeps the template language-agnostic.
-
----
-
-## Model Configuration
-
-- Model/backend selection is **registry-driven** from `llmstack_config.json` (`active_model` + `models` map), loaded by `llmstack/models/registry.py`.
-- The active model resolves to a backend type and target model; supported backend types are:
-  - `dflash`
-  - `mlx`
-  - `turboquant`
-- All inference backends serve on `127.0.0.1:8787`; Headroom serves on `127.0.0.1:8789`.
-
-### Model selection commands
-
-```bash
-# Show configured models and current active model
-python -m llmstack.cli model list
-
-# Switch active model (persists active_model in llmstack_config.json)
-python -m llmstack.cli model use mlx-gemma4-12b
-
-# Optional recommender
-python -m llmstack.cli model recommend --use agentic
-python -m llmstack.cli model recommend --use decode --apply
-```
-
-When `model use`/`recommend --apply` runs, llmstack syncs CCR and, if inference is already running on `:8787`, swaps it to the selected target model.
-
-### Serving a specific model/backend
-
-`python -m llmstack.cli serve [model_name]` accepts an optional model name. If provided and present in the registry, it updates `active_model`, syncs CCR, and serves that backend/model.
-
-Examples:
-
-```bash
-# Start default DFlash wrapper behavior (or pass a DFlash model name)
-bash bin/start_dflash_server.bash
-
-# Wrapper default is mlx-gemma4-12b unless you pass a model name
-bash bin/start_mlx_server.bash
-bash bin/start_mlx_server.bash mlx-gemma4-12b
-
-# Wrapper default is turboquant-qwen35b-moe unless overridden
-bash bin/start_turboquant_server.bash
-bash bin/start_turboquant_server.bash turboquant-qwen35b-moe
-```
-
-### CCR multi-model routing behavior
-
-`llmstack/services/ccr_service.py` renders CCR config from the full model registry (multi-provider/multi-model), and routes:
-
-- `default`
-- `background`
-- `think`
-- `longContext`
-- `webSearch`
-
-to the currently active `<provider>,<target>` pair, with provider endpoints pinned to local Headroom (`http://127.0.0.1:8789/v1/chat/completions`).
-
-### End-to-end switching examples
-
-```bash
-# Switch active model/backend first
-python -m llmstack.cli model use turboquant-qwen35b-moe
-
-# Then run interactive mode
-bash bin/launch_ccr.bash
-```
-
-```bash
-# Switch to MLX model/backend
-python -m llmstack.cli model use mlx-gemma4-12b
-
-# Then run autonomous Kowalski mode
-bash bin/launch_kowalski.bash
-```
-
----
-
-## Task Schema (plan JSON)
+## Advanced Reference: Task Schema (plan JSON)
 
 Each task in the plan file has this structure:
 
@@ -908,9 +1116,7 @@ Kowalski will:
 
 ---
 
----
-
-## Advanced: Executor Selection
+## Advanced Reference: Executor Selection
 
 Kowalski chooses between **two executors** for each task:
 
@@ -1089,7 +1295,9 @@ Then run Kowalski and feed it tasks from another terminal:
 bash bin/launch_kowalski.bash
 
 # Terminal 2 — append a task to the queue at any time
-cat > my_project/task_queue.json <<'EOF'
+cd ~/local-llm-workspace
+mkdir -p prj/my_project
+cat > prj/my_project/task_queue.json <<'EOF'
 { "tasks": [
   { "id": "q1", "prompt": "Add a health-check endpoint", "file": "server.py",
     "verify": "python -m py_compile server.py" }
@@ -1210,7 +1418,7 @@ Priority ordering still applies, so higher-priority tasks are presented first.
 
 ### DFlash server won't start
 - Ensure MLX is compatible (Apple Silicon + macOS 12.2+)
-- Check memory: `free -h` (need ~16 GB available for 27B model)
+- Check memory on macOS: `vm_stat` (or Activity Monitor) and ensure ~16 GB free for the 27B model
 - Restart: `bash bin/launch_kowalski.bash`
 
 ### Claude Code timeout
@@ -1224,7 +1432,7 @@ Priority ordering still applies, so higher-priority tasks are presented first.
 
 ### Git state corrupted
 - Kowalski automatically resets to the last checkpoint on error
-- Manual fix: `cd ./pacman_clone && git reset --hard HEAD`
+- Manual fix: `cd ./prj/pacman_clone && git reset --hard HEAD`
 
 ---
 

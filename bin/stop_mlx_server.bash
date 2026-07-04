@@ -11,10 +11,45 @@ fi
 
 PORT="8787"
 NAME="MLX"
+WATCHDOG_PATTERN="llmstack\\.cli serve --watchdog"
+WATCHDOG_PID_FILE="logs/inference_watchdog.pid"
+BACKEND_PATTERN="-m mlx_lm server|env/bin/dflash serve| dflash serve"
+
+watchdog_pids="$(pgrep -f "${WATCHDOG_PATTERN}" || true)"
+if [[ -n "${watchdog_pids}" ]]; then
+  echo "Stopping ${NAME} watchdog (PID: ${watchdog_pids//$'\n'/, })..."
+  kill ${watchdog_pids} || true
+  for _ in {1..5}; do
+    sleep 1
+    still="$(pgrep -f "${WATCHDOG_PATTERN}" || true)"
+    if [[ -z "${still}" ]]; then
+      break
+    fi
+  done
+  still="$(pgrep -f "${WATCHDOG_PATTERN}" || true)"
+  if [[ -n "${still}" ]]; then
+    echo "Watchdog did not stop gracefully; forcing shutdown (PID: ${still//$'\n'/, })..."
+    kill -9 ${still} || true
+  fi
+fi
+rm -f "${WATCHDOG_PID_FILE}"
 
 pids="$(lsof -ti tcp:${PORT} || true)"
 if [[ -z "${pids}" ]]; then
-  echo "${NAME} is not running on port ${PORT}."
+  backend_pids="$(pgrep -f "${BACKEND_PATTERN}" || true)"
+  if [[ -z "${backend_pids}" ]]; then
+    echo "${NAME} is not running on port ${PORT}."
+    exit 0
+  fi
+  echo "Stopping ${NAME} backend process (PID: ${backend_pids//$'\n'/, })..."
+  kill ${backend_pids} || true
+  sleep 1
+  backend_pids="$(pgrep -f "${BACKEND_PATTERN}" || true)"
+  if [[ -n "${backend_pids}" ]]; then
+    echo "${NAME} backend did not stop gracefully; forcing shutdown (PID: ${backend_pids//$'\n'/, })..."
+    kill -9 ${backend_pids} || true
+  fi
+  echo "${NAME} stopped."
   exit 0
 fi
 

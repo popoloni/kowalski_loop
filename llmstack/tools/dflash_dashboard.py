@@ -16,6 +16,7 @@ from rich.table import Table
 
 CONFIG_PATH = "llmstack_config.json"
 HEALTH_URL = "http://127.0.0.1:8787/v1/models"
+HEADROOM_HEALTH_URL = "http://127.0.0.1:8789/health"
 START_AT_END = True
 RECENT_KEEP = 12
 DECODE_BAR_CAP = 8192
@@ -335,6 +336,8 @@ class TurboQuantParser(BaseInferenceParser):
 class Monitor:
     def __init__(self):
         self.status = "OFFLINE"
+        self.inference_status = "[bold red]OFFLINE[/bold red]"
+        self.headroom_status = "[bold red]OFFLINE[/bold red]"
         self.last_hb = 0.0
 
         self.cfg = _load_runtime_config(CONFIG_PATH)
@@ -417,10 +420,27 @@ class Monitor:
             return
         self.last_hb = now
         self.refresh_runtime_context()
+
+        inference_ok = False
+        headroom_ok = False
         try:
-            ok = urllib.request.urlopen(HEALTH_URL, timeout=1).getcode() == 200
-            self.status = "[bold green]ONLINE & HEALTHY[/bold green]" if ok else "[bold yellow]DEGRADED[/bold yellow]"
+            inference_ok = urllib.request.urlopen(HEALTH_URL, timeout=1).getcode() == 200
         except Exception:
+            inference_ok = False
+
+        try:
+            headroom_ok = urllib.request.urlopen(HEADROOM_HEALTH_URL, timeout=1).getcode() == 200
+        except Exception:
+            headroom_ok = False
+
+        self.inference_status = "[bold green]ONLINE[/bold green]" if inference_ok else "[bold red]OFFLINE[/bold red]"
+        self.headroom_status = "[bold green]ONLINE[/bold green]" if headroom_ok else "[bold red]OFFLINE[/bold red]"
+
+        if inference_ok and headroom_ok:
+            self.status = "[bold green]ONLINE & HEALTHY[/bold green]"
+        elif inference_ok or headroom_ok:
+            self.status = "[bold yellow]DEGRADED[/bold yellow]"
+        else:
             self.status = "[bold red]OFFLINE / UNREACHABLE[/bold red]"
 
     def read_new_lines(self):
@@ -555,6 +575,7 @@ class Monitor:
         t.add_column("v", justify="right")
         pct = (100 * self.hr_saved / self.hr_in_orig) if self.hr_in_orig else 0.0
         chr_ = (100 * self.hr_cache_hits / self.hr_count) if self.hr_count else 0.0
+        t.add_row("Status:", self.headroom_status)
         t.add_row("Requests:", f"{self.hr_count}")
         t.add_row("In orig:", f"{self.hr_in_orig:,}")
         t.add_row("In sent:", f"{self.hr_in_opt:,}")
@@ -618,7 +639,7 @@ class Monitor:
                     _fmt(r.get("total_time_s")),
                     _fmt(r.get("accept_pct")),
                 )
-            title = f"[bold]Inference Completed ({self.runtime.get('backend_name')})[/bold] (logged {self.total_calls} → {self.csv_file})"
+            title = f"[bold]Inference Completed ({self.runtime.get('backend_name')})[/bold] (logged {self.total_calls})"
             return Panel(t, title=title, border_style="white")
 
         t = Table(expand=True, box=None, header_style="bold white")
@@ -637,7 +658,7 @@ class Monitor:
                 _fmt(r.get("total_time_s")),
                 _fmt(r.get("decode_tokens"), 0),
             )
-        title = f"[bold]Inference Completed ({self.runtime.get('backend_name')})[/bold] (logged {self.total_calls} → {self.csv_file})"
+        title = f"[bold]Inference Completed ({self.runtime.get('backend_name')})[/bold] (logged {self.total_calls})"
         return Panel(t, title=title, border_style="white")
 
     def render(self):
@@ -645,19 +666,12 @@ class Monitor:
         self.ingest()
         self.ingest_headroom()
 
-        hr_pct = (100 * self.hr_saved / self.hr_in_orig) if self.hr_in_orig else 0.0
-
         backend = self.runtime.get("backend_name", "unknown")
-        active_model = self.runtime.get("active_model_name") or "n/a"
-        active_target = self.runtime.get("active_target") or "n/a"
         served_target = self.runtime.get("served_target") or "n/a"
-        confidence = self.runtime.get("confidence", "low")
-        mismatch_badge = "  [bold red]MISMATCH[/bold red]" if self.runtime.get("mismatch") else ""
 
         header_text = (
-            f"⚡ Inference Monitor   |   backend={backend} ({confidence})   |   model {active_model}"
-            f" ({active_target})   |   served {served_target}{mismatch_badge}   |   {self.status}   |   "
-            f"🗜️ Headroom saved {hr_pct:.1f}% ({self.hr_saved:,} tok)"
+            f"⚡ Inference Monitor   |   engine={backend}   |   inference {self.inference_status}   |   "
+            f"served {served_target}   |   headroom {self.headroom_status}"
         )
 
         layout = Layout()

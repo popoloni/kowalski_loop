@@ -117,5 +117,26 @@ def build_backend(model_name, model_cfg):
 def load_active_backend(config):
     registry = load_model_registry(config)
     model_name = active_model_name(config, registry)
-    backend = build_backend(model_name, registry[model_name])
+    model_cfg = copy.deepcopy(registry[model_name])
+    backend_type = str(model_cfg.get("type") or "").strip().lower()
+
+    # Priority: model-local < global backend_stability_* < type-specific *_stability_*
+    profile = config.get("backend_stability_profile")
+    type_profile = config.get(f"{backend_type}_stability_profile") if backend_type else None
+    if type_profile:
+        profile = type_profile
+    if profile:
+        model_cfg["stability_profile"] = profile
+
+    merged_overrides = dict(model_cfg.get("stability_overrides") or {})
+    global_overrides = config.get("backend_stability_overrides")
+    if isinstance(global_overrides, dict) and global_overrides:
+        merged_overrides.update(global_overrides)
+    type_overrides = config.get(f"{backend_type}_stability_overrides") if backend_type else None
+    if isinstance(type_overrides, dict) and type_overrides:
+        merged_overrides.update(type_overrides)
+    if merged_overrides:
+        model_cfg["stability_overrides"] = merged_overrides
+
+    backend = build_backend(model_name, model_cfg)
     return model_name, backend, registry
