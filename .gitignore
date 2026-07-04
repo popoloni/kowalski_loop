@@ -26,3 +26,6 @@ __pycache__/
 
 # VSCode
 .vscode/
+
+# Local automation scripts (not versioned)
+.local/
