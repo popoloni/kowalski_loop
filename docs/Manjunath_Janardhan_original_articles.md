@@ -250,3 +250,5 @@ mlx-community/Qwen3.6–27B-4bit on Hugging Face
 https://huggingface.co/mlx-community/Qwen3.6-27B-4bit
 Draft — z-lab/Qwen3.6–27B-DFlash on Hugging Face
 https://huggingface.co/z-lab/Qwen3.6-27B-DFlash
+
+PART 3 ---

@@ -65,7 +65,12 @@ A manual tester should be able to confirm that:
 ```bash
 cd /Users/enricopapalini/local-llm-workspace
 source env/bin/activate
+python -m pip install -e .
 ```
+
+The editable install step is required if you want to run `python -m llmstack.cli ...`
+from temporary workspaces outside the repository root. After that install, the same
+activated `env/` can be reused from any test directory under `/tmp`.
 
 ### Useful verification commands
 
@@ -82,6 +87,14 @@ Prepare at least two temporary workspaces for manual testing:
 - one generic workspace
 
 You can create them under `/tmp` or with `mktemp -d`.
+
+Example setup:
+
+```bash
+tmp_python=$(mktemp -d /tmp/llmstack-python-XXXXXX)
+tmp_js=$(mktemp -d /tmp/llmstack-js-XXXXXX)
+tmp_generic=$(mktemp -d /tmp/llmstack-generic-XXXXXX)
+```
 
 ---
 
@@ -141,8 +154,19 @@ The release can be considered manually validated if all of the following are tru
 - Use an empty temporary directory.
 
 **Steps:**
-1. Start from a temp directory.
-2. Run `python -m llmstack.cli init`.
+1. Start from a temp directory, for example:
+
+```bash
+tmpdir=$(mktemp -d /tmp/llmstack-init-interactive-XXXXXX)
+cd "$tmpdir"
+```
+
+2. Run:
+
+```bash
+python -m llmstack.cli init
+```
+
 3. Answer the prompts for:
    - `dev_root`
    - project type
@@ -161,8 +185,14 @@ The release can be considered manually validated if all of the following are tru
 **Purpose:** verify the wizard can be scripted.
 
 **Steps:**
-1. Use a new temporary directory.
-2. Run a command similar to:
+1. Use a new temporary directory, for example:
+
+```bash
+tmpdir=$(mktemp -d /tmp/llmstack-init-noninteractive-XXXXXX)
+cd "$tmpdir"
+```
+
+2. Run exactly:
 
 ```bash
 python -m llmstack.cli init \
@@ -184,8 +214,21 @@ python -m llmstack.cli init \
 **Purpose:** verify project type handling is user-friendly.
 
 **Steps:**
-1. Run the wizard with aliases such as `javascript`, `typescript`, `node`, `nodejs`, and `py`.
-2. Compare the generated config output for each case.
+1. For each alias, start from a fresh temp directory and run the wizard non-interactively.
+2. Example commands:
+
+```bash
+tmpdir=$(mktemp -d /tmp/llmstack-init-alias-js-XXXXXX)
+cd "$tmpdir"
+python -m llmstack.cli init --non-interactive --project-type javascript --no-bootstrap-plan
+
+tmpdir=$(mktemp -d /tmp/llmstack-init-alias-py-XXXXXX)
+cd "$tmpdir"
+python -m llmstack.cli init --non-interactive --project-type py --no-bootstrap-plan
+```
+
+3. Repeat with `typescript`, `node`, and `nodejs` as needed.
+4. Compare the generated config output for each case.
 
 **Expected result:**
 - JavaScript-like aliases normalize to the `js` template.
@@ -196,8 +239,8 @@ python -m llmstack.cli init \
 **Purpose:** confirm the new template metadata is present.
 
 **Steps:**
-1. Create a new config using the wizard.
-2. Open the resulting `llmstack_config.json`.
+1. Create a new config using the wizard in a fresh temp directory.
+2. Open the resulting `llmstack_config.json` in that temp directory.
 
 **Expected result:**
 - The config contains `project_type`.
@@ -214,8 +257,17 @@ python -m llmstack.cli init \
 **Purpose:** verify the starter plan switch.
 
 **Steps:**
-1. Run the wizard with plan bootstrap enabled.
-2. Run the wizard again in a separate temp workspace with plan bootstrap disabled.
+1. In one fresh temp directory, run:
+
+```bash
+python -m llmstack.cli init --non-interactive --project-type python --bootstrap-plan
+```
+
+2. In a second fresh temp directory, run:
+
+```bash
+python -m llmstack.cli init --non-interactive --project-type python --no-bootstrap-plan
+```
 
 **Expected result:**
 - When enabled, a starter plan file is generated.
@@ -226,8 +278,19 @@ python -m llmstack.cli init \
 **Purpose:** verify overwrite protection.
 
 **Steps:**
-1. Create a workspace and add a placeholder `llmstack_config.json`.
-2. Run `python -m llmstack.cli init` in that workspace.
+1. Create a fresh temp workspace and add a placeholder config:
+
+```bash
+tmpdir=$(mktemp -d /tmp/llmstack-init-protect-XXXXXX)
+cd "$tmpdir"
+printf '{"sentinel": true}\n' > llmstack_config.json
+```
+
+2. Run:
+
+```bash
+python -m llmstack.cli init
+```
 
 **Expected result:**
 - The command fails with a clear overwrite refusal.
@@ -237,8 +300,12 @@ python -m llmstack.cli init \
 **Purpose:** verify overwrite is allowed when the flag is passed before `init`.
 
 **Steps:**
-1. Create a workspace with an existing config file.
-2. Run `python -m llmstack.cli --force init ...`.
+1. Create a fresh temp workspace with an existing config file.
+2. Run a command such as:
+
+```bash
+python -m llmstack.cli --force init --non-interactive --project-type generic --no-bootstrap-plan
+```
 
 **Expected result:**
 - The command overwrites the existing config.
@@ -248,8 +315,12 @@ python -m llmstack.cli init \
 **Purpose:** verify the regression fixed in the commit.
 
 **Steps:**
-1. Create a workspace with an existing config file.
-2. Run `python -m llmstack.cli init --force --non-interactive ...`.
+1. Create a fresh temp workspace with an existing config file.
+2. Run a command such as:
+
+```bash
+python -m llmstack.cli init --force --non-interactive --project-type generic --no-bootstrap-plan
+```
 
 **Expected result:**
 - The command succeeds.
@@ -260,8 +331,12 @@ python -m llmstack.cli init \
 **Purpose:** confirm model validation happens before the config is written.
 
 **Steps:**
-1. Run the wizard with a model name that is not in the registry.
-2. Use a fresh temp workspace.
+1. Use a fresh temp workspace.
+2. Run:
+
+```bash
+python -m llmstack.cli init --non-interactive --model not-a-real-model --no-bootstrap-plan
+```
 
 **Expected result:**
 - The command fails clearly.

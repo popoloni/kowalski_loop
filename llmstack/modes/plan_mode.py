@@ -15,6 +15,7 @@ class PlanMode(LoopMode):
         self.git = git_manager
         self.executor = executor
         self.services = services
+        self._skip_logged = set()
 
     def _task_priority(self, task):
         try:
@@ -30,7 +31,10 @@ class PlanMode(LoopMode):
     def next_task(self):
         for task in self._ordered_tasks():
             if task.get("status") in ("completed", "skipped"):
-                print(f"⏭️  [Ralph] Skipping Task {task.get('id')} ({task.get('status')})")
+                key = id(task)
+                if key not in self._skip_logged:
+                    self._skip_logged.add(key)
+                    print(f"⏭️  [Kowalski] Skipping Task {task.get('id')} ({task.get('status')})")
                 continue
             return task
         return None
@@ -48,17 +52,17 @@ class PlanMode(LoopMode):
 
         if outcome == "FORMAT_ERROR" and executor_type == "agent":
             if task.get("on_format_error") == "direct_context_fallback":
-                print("🛟 [Ralph] Agent format error persisted — falling back to direct context generation.")
+                print("🛟 [Kowalski] Agent format error persisted — falling back to direct context generation.")
                 outcome = self.executor.run_direct_context_fallback(task, attempt=attempt)
             else:
-                print("⚠️  [Ralph] FORMAT_ERROR with no fallback strategy configured.")
+                print("⚠️  [Kowalski] FORMAT_ERROR with no fallback strategy configured.")
                 outcome = "AGENT_ERROR"
 
         if outcome == "OK":
             task["status"] = "completed"
             self._persist_plan()
             self.git.git_checkpoint(task, label="verified")
-            print(f"✅ [Ralph] Task {task.get('id')} COMPLETE & verified.")
+            print(f"✅ [Kowalski] Task {task.get('id')} COMPLETE & verified.")
             done = True
         elif outcome == "ALREADY_DONE":
             allow_already_done = task.get(
@@ -67,7 +71,7 @@ class PlanMode(LoopMode):
             )
             if not allow_already_done:
                 hard_fails += 1
-                print(f"⚠️  [Ralph] Agent says already_done but policy is disabled "
+                print(f"⚠️  [Kowalski] Agent says already_done but policy is disabled "
                       f"({hard_fails}/{self.config['max_retries']}).")
                 time.sleep(2)
             else:
@@ -83,17 +87,17 @@ class PlanMode(LoopMode):
                     task["status"] = "completed"
                     self._persist_plan()
                     self.git.git_checkpoint(task, label="already-done-verified")
-                    print(f"✅ [Ralph] Task {task.get('id')} ALREADY_DONE and verified.")
+                    print(f"✅ [Kowalski] Task {task.get('id')} ALREADY_DONE and verified.")
                     done = True
                 else:
                     task["_verify_feedback"] = feedback or reason
                     hard_fails += 1
                     self.git.restore_to_checkpoint(task)
-                    print(f"⚠️  [Ralph] ALREADY_DONE verification failed ({reason}) — rolled back "
+                    print(f"⚠️  [Kowalski] ALREADY_DONE verification failed ({reason}) — rolled back "
                           f"({hard_fails}/{self.config['max_retries']}).")
                     time.sleep(3)
         elif outcome == "SERVER_CRASH":
-            print("♻️  [Ralph] Server crash — restarting (not counted).")
+            print("♻️  [Kowalski] Server crash — restarting (not counted).")
             self.services.restart()
             if executor_type == "agent" and self.executor.syntax_ok(task):
                 self.git.wip_commit(task)
@@ -104,24 +108,24 @@ class PlanMode(LoopMode):
                 if resumes < self.config["max_resumes"]:
                     self.git.wip_commit(task)
                     resumes += 1
-                    print(f"⏸️  [Ralph] {outcome} but file is VALID — progress kept, RESUMING "
+                    print(f"⏸️  [Kowalski] {outcome} but file is VALID — progress kept, RESUMING "
                           f"(resume {resumes}/{self.config['max_resumes']}).")
                 else:
                     hard_fails += 1
-                    print(f"⚠️  [Ralph] Resume budget exhausted for task {task.get('id')} "
+                    print(f"⚠️  [Kowalski] Resume budget exhausted for task {task.get('id')} "
                           f"({resumes}/{self.config['max_resumes']}); counting as hard fail "
                           f"({hard_fails}/{self.config['max_retries']}).")
                     time.sleep(3)
             else:
                 hard_fails += 1
                 self.git.restore_to_checkpoint(task)
-                print(f"⚠️  [Ralph] {outcome} (no usable progress) — rolled back "
+                print(f"⚠️  [Kowalski] {outcome} (no usable progress) — rolled back "
                       f"({hard_fails}/{self.config['max_retries']}).")
                 time.sleep(5)
         else:
             hard_fails += 1
             self.git.restore_to_checkpoint(task)
-            print(f"⚠️  [Ralph] {outcome} — rolled back ({hard_fails}/{self.config['max_retries']}).")
+            print(f"⚠️  [Kowalski] {outcome} — rolled back ({hard_fails}/{self.config['max_retries']}).")
             time.sleep(5)
 
         return {
@@ -137,11 +141,11 @@ class PlanMode(LoopMode):
                 and self.executor.syntax_ok(task)
                 and self._has_usable_progress(task)):
             self.git.wip_commit(task)
-            print(f"🚧 [Ralph] Task {task.get('id')} INCOMPLETE — valid progress KEPT as WIP. "
+            print(f"🚧 [Kowalski] Task {task.get('id')} INCOMPLETE — valid progress KEPT as WIP. "
                   f"Re-run to resume from here. Halting.")
         else:
             self.git.restore_to_checkpoint(task)
-            print(f"🚨 [Ralph] Task {task.get('id')} NOT completed — rolled back. Halting.")
+            print(f"🚨 [Kowalski] Task {task.get('id')} NOT completed — rolled back. Halting.")
 
     def _has_usable_progress(self, task):
         changed = self.git.changed_files()

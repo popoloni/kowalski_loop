@@ -166,7 +166,7 @@ Tasks 9–22 now carry `mode: "direct"`, a primary `file`, and the `context` fil
 
 ---
 
-### 5. `~/local-llm-workspace/ralph_loop.py`
+### 5. `~/local-llm-workspace/kowalski_loop.py`
 
 Adds `run_direct_task`, dispatches on `mode`, fixes the **OOM** (12 GB cache + snapshot cap), skips the wasteful warm-up when no agentic tasks remain, and removes the duplicate import.
 
@@ -187,7 +187,7 @@ os.environ.update({
     "CLAUDE_ENABLE_BYTE_WATCHDOG": "0",
     "CLAUDE_ENABLE_STREAM_WATCHDOG": "0",
 })
-print(f"⏱️  [Ralph] API_TIMEOUT_MS={os.environ['API_TIMEOUT_MS']} forced.")
+print(f"⏱️  [Kowalski] API_TIMEOUT_MS={os.environ['API_TIMEOUT_MS']} forced.")
 
 # ---------------- CONFIG ----------------
 def load_config():
@@ -199,9 +199,9 @@ def load_config():
     if os.path.exists("llmstack_config.json"):
         with open("llmstack_config.json") as f:
             cfg.update(json.load(f))
-        print(f"🔧 [Ralph] Config loaded: Root='{cfg['dev_root']}', Plan='{cfg['plan_file']}'")
+        print(f"🔧 [Kowalski] Config loaded: Root='{cfg['dev_root']}', Plan='{cfg['plan_file']}'")
     else:
-        print("⚠️ [Ralph] No llmstack_config.json found, using defaults.")
+        print("⚠️ [Kowalski] No llmstack_config.json found, using defaults.")
     return cfg
 
 CONFIG     = load_config()
@@ -237,7 +237,7 @@ DFLASH_CMD = [
 ]
 
 
-class RalphSupervisor:
+class KowalskiSupervisor:
     def __init__(self):
         self.server_process = None
         self._stop = False
@@ -254,30 +254,30 @@ class RalphSupervisor:
     def start_server(self):
         if self.server_process and self.server_process.poll() is None:
             return
-        print("🚀 [Ralph] Starting DFlash server...")
+        print("🚀 [Kowalski] Starting DFlash server...")
         with open("dflash_server.log", "a") as log:
             self.server_process = subprocess.Popen(
                 DFLASH_CMD, stdout=log, stderr=subprocess.STDOUT, preexec_fn=os.setsid)
         self.wait_for_health()
 
     def wait_for_health(self, boot_timeout=600):
-        print("⏳ [Ralph] Waiting for model to load into RAM...")
+        print("⏳ [Kowalski] Waiting for model to load into RAM...")
         start = time.time()
         while not self._stop:
             if self._ping():
-                print("✅ [Ralph] Server online and healthy.")
+                print("✅ [Kowalski] Server online and healthy.")
                 return True
             if self.server_process.poll() is not None:
-                print("❌ [Ralph] Server died during boot. Restarting...")
+                print("❌ [Kowalski] Server died during boot. Restarting...")
                 self.server_process = None
                 return self.start_server()
             if time.time() - start > boot_timeout:
-                print("❌ [Ralph] Server boot timed out.")
+                print("❌ [Kowalski] Server boot timed out.")
                 return False
             time.sleep(5)
 
     def restart_server(self):
-        print("♻️  [Ralph] Hard-restarting DFlash...")
+        print("♻️  [Kowalski] Hard-restarting DFlash...")
         self.kill_server(); time.sleep(3); self.start_server()
 
     def kill_server(self):
@@ -329,35 +329,35 @@ class RalphSupervisor:
             "stream": False,
         }).encode()
 
-        print(f"✍️  [Ralph] Direct-generating {out_file} (context: {context or 'none'})")
+        print(f"✍️  [Kowalski] Direct-generating {out_file} (context: {context or 'none'})")
         req = urllib.request.Request(DIRECT_URL, data=body, headers={"Content-Type": "application/json"})
         try:
             resp = json.load(urllib.request.urlopen(req, timeout=CONFIG["task_timeout"]))
         except Exception as e:
-            print(f"❌ [Ralph] Direct call failed: {e}")
+            print(f"❌ [Kowalski] Direct call failed: {e}")
             return "TIMEOUT"
         try:
             code = self._strip_fences(resp["choices"][0]["message"]["content"])
         except (KeyError, IndexError, TypeError):
-            print(f"❌ [Ralph] Unexpected response: {str(resp)[:300]}")
+            print(f"❌ [Kowalski] Unexpected response: {str(resp)[:300]}")
             return "BAD_OUTPUT"
         with open(os.path.join(DEV_ROOT, out_file), "w") as f:
             f.write(code)
-        print(f"📝 [Ralph] Wrote {out_file} ({len(code)} bytes).")
+        print(f"📝 [Kowalski] Wrote {out_file} ({len(code)} bytes).")
         return "OK" if self._verify(task) else "VERIFY_FAILED"
 
     # ---------- cache warm-up (agentic only) ----------
     def warm_up_cache(self):
-        print("🔥 [Ralph] Warming the agentic prefix cache...")
+        print("🔥 [Kowalski] Warming the agentic prefix cache...")
         try:
             subprocess.run(
                 ["ccr", "code", "-p", "Reply with OK only.",
                  "--output-format", "json",
                  "--permission-mode", CONFIG["permission_mode"], "--max-turns", "1"],
                 cwd=DEV_ROOT, capture_output=True, text=True, timeout=CONFIG["task_timeout"])
-            print("✅ [Ralph] Cache warm.")
+            print("✅ [Kowalski] Cache warm.")
         except Exception as e:
-            print(f"⚠️  [Ralph] Warm-up skipped ({e}).")
+            print(f"⚠️  [Kowalski] Warm-up skipped ({e}).")
 
     # ---------- AGENTIC execution (fallback for non-direct tasks) ----------
     def _retry_directive(self, attempt):
@@ -375,7 +375,7 @@ class RalphSupervisor:
         tools = task.get("tools")
         if tools:
             cmd += ["--allowedTools", *tools]
-        print(f"⚙️  [Ralph] Running Task {task.get('id')} (agentic) in {DEV_ROOT}")
+        print(f"⚙️  [Kowalski] Running Task {task.get('id')} (agentic) in {DEV_ROOT}")
         server_crashed = threading.Event()
         proc = subprocess.Popen(cmd, cwd=DEV_ROOT, text=True,
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, preexec_fn=os.setsid)
@@ -392,7 +392,7 @@ class RalphSupervisor:
         try:
             data = json.loads(stdout)
         except (json.JSONDecodeError, TypeError):
-            print("❌ [Ralph] Could not parse CLI JSON:", (stdout or stderr or "<empty>")[:300])
+            print("❌ [Kowalski] Could not parse CLI JSON:", (stdout or stderr or "<empty>")[:300])
             return "BAD_OUTPUT"
         result = None
         if isinstance(data, list):
@@ -407,7 +407,7 @@ class RalphSupervisor:
         if is_error or subtype != "success":
             detail = result.get("result") or result.get("error") or ""
             if isinstance(detail, (dict, list)): detail = json.dumps(detail)
-            print(f"ℹ️  [Ralph] is_error={is_error}, subtype={subtype}. Detail: {str(detail)[:300]}")
+            print(f"ℹ️  [Kowalski] is_error={is_error}, subtype={subtype}. Detail: {str(detail)[:300]}")
         if subtype in ("error_max_turns", "error_during_execution"):
             return "AGENT_ERROR"
         return "OK" if self._verify(task) else "VERIFY_FAILED"
@@ -418,7 +418,7 @@ class RalphSupervisor:
             if not self._ping():
                 fails += 1
                 if fails >= 3:
-                    print("🔥 [Ralph] DFlash died DURING the task — aborting agent.")
+                    print("🔥 [Kowalski] DFlash died DURING the task — aborting agent.")
                     server_crashed.set(); self._kill_proc(proc); return
             else:
                 fails = 0
@@ -434,20 +434,20 @@ class RalphSupervisor:
     def _verify(self, task):
         verify_cmd = task.get("verify")
         if not verify_cmd:
-            print("⚠️  [Ralph] No 'verify' for this task — skipping gate.")
+            print("⚠️  [Kowalski] No 'verify' for this task — skipping gate.")
             return True
-        print(f"🔎 [Ralph] Verifying: {verify_cmd}")
+        print(f"🔎 [Kowalski] Verifying: {verify_cmd}")
         r = subprocess.run(verify_cmd, shell=True, cwd=DEV_ROOT, capture_output=True, text=True)
         if r.returncode != 0:
-            print(f"❌ [Ralph] Verification FAILED:\n{r.stdout}\n{r.stderr}")
+            print(f"❌ [Kowalski] Verification FAILED:\n{r.stdout}\n{r.stderr}")
         return r.returncode == 0
 
     def git_checkpoint(self, task):
         subprocess.run(["git", "init"], cwd=DEV_ROOT, capture_output=True)
         subprocess.run(["git", "add", "."], cwd=DEV_ROOT, capture_output=True)
-        subprocess.run(["git", "commit", "-m", f"Ralph checkpoint: task {task.get('id')} verified"],
+        subprocess.run(["git", "commit", "-m", f"Kowalski checkpoint: task {task.get('id')} verified"],
                        cwd=DEV_ROOT, capture_output=True)
-        print(f"📦 [Ralph] Git checkpoint saved for task {task.get('id')}.")
+        print(f"📦 [Kowalski] Git checkpoint saved for task {task.get('id')}.")
 
     def mark_complete(self, plan, task):
         task["status"] = "completed"
@@ -457,11 +457,11 @@ class RalphSupervisor:
     # ---------- main loop ----------
     def run_plan(self):
         if not os.path.exists(PLAN_FILE):
-            print(f"❌ [Ralph] Plan file '{PLAN_FILE}' not found."); return
+            print(f"❌ [Kowalski] Plan file '{PLAN_FILE}' not found."); return
         with open(PLAN_FILE) as f:
             plan = json.load(f)
         tasks = plan.get("tasks", [])
-        print(f"📋 [Ralph] Loaded {len(tasks)} tasks.")
+        print(f"📋 [Kowalski] Loaded {len(tasks)} tasks.")
 
         pending = [t for t in tasks if t.get("status") != "completed"]
         if any(t.get("mode") != "direct" for t in pending):
@@ -469,14 +469,14 @@ class RalphSupervisor:
 
         for task in tasks:
             if task.get("status") == "completed":
-                print(f"⏭️  [Ralph] Skipping Task {task.get('id')} (completed)"); continue
+                print(f"⏭️  [Kowalski] Skipping Task {task.get('id')} (completed)"); continue
 
             attempts, done = 0, False
             while not done and attempts < CONFIG["max_retries"] and not self._stop:
                 if not self._ping():
                     self.restart_server()
                 attempts += 1
-                print(f"▶️  [Ralph] Task {task.get('id')} — attempt {attempts}")
+                print(f"▶️  [Kowalski] Task {task.get('id')} — attempt {attempts}")
                 if task.get("mode") == "direct":
                     outcome = self.run_direct_task(task)
                 else:
@@ -485,42 +485,42 @@ class RalphSupervisor:
                 if outcome == "OK":
                     self.git_checkpoint(task)
                     self.mark_complete(plan, task)
-                    print(f"✅ [Ralph] Task {task.get('id')} COMPLETE & verified.")
+                    print(f"✅ [Kowalski] Task {task.get('id')} COMPLETE & verified.")
                     done = True
                 elif outcome == "SERVER_CRASH":
-                    print("♻️  [Ralph] Server crash — restarting; retry won't count.")
+                    print("♻️  [Kowalski] Server crash — restarting; retry won't count.")
                     self.restart_server()
                     attempts -= 1                    # a crash is not an agent failure
                 else:
-                    print(f"⚠️  [Ralph] Task {task.get('id')} -> {outcome}. Retry in 10s.")
+                    print(f"⚠️  [Kowalski] Task {task.get('id')} -> {outcome}. Retry in 10s.")
                     time.sleep(10)
 
             if not done:
-                print(f"🚨 [Ralph] Task {task.get('id')} NOT completed. Halting (NOT marked done).")
+                print(f"🚨 [Kowalski] Task {task.get('id')} NOT completed. Halting (NOT marked done).")
                 self.shutdown()
                 return
 
-        print("\n🎉 [Ralph] All tasks verified and committed!")
+        print("\n🎉 [Kowalski] All tasks verified and committed!")
         self.shutdown()
 
     def shutdown(self, signum=None, frame=None):
         self._stop = True
-        print("\n🛑 [Ralph] Shutting down infrastructure...")
+        print("\n🛑 [Kowalski] Shutting down infrastructure...")
         self.kill_server()
         sys.exit(0)
 
 
 if __name__ == "__main__":
-    ralph = RalphSupervisor()
-    ralph.start_server()
-    ralph.run_plan()
+    kowalski = KowalskiSupervisor()
+    kowalski.start_server()
+    kowalski.run_plan()
 ```
 
-That completes `ralph_loop.py`. Now the remaining two scripts.
+That completes `kowalski_loop.py`. Now the remaining two scripts.
 
 ---
 
-### 6. `~/local-llm-workspace/ralph_launcher.bash`
+### 6. `~/local-llm-workspace/kowalski_launcher.bash`
 
 Full launcher with the **correct** Headroom wiring (`OPENAI_TARGET_API_URL`), the isolated 3.13 subshell, kill-and-restart, and a hard pre-flight that aborts if Headroom isn't routing to dflash.
 
@@ -528,7 +528,7 @@ Full launcher with the **correct** Headroom wiring (`OPENAI_TARGET_API_URL`), th
 #!/bin/bash
 set -e
 
-echo "🤖 Booting Ralph Unattended Agent System..."
+echo "🤖 Booting Kowalski Unattended Agent System..."
 
 # 1. Must run from the workspace
 if [ ! -d "env" ]; then
@@ -602,8 +602,8 @@ echo "🔄 Restarting Claude Code Router daemon..."
 ccr restart
 
 # 8. Hand over to the orchestrator (it starts dflash and runs the plan)
-echo "🚀 Handing over control to Ralph Orchestrator..."
-python3 ralph_loop.py
+echo "🚀 Handing over control to Kowalski Orchestrator..."
+python3 kowalski_loop.py
 ```
 
 ---
@@ -642,14 +642,14 @@ echo "         -d '{\"model\":\"mlx-community/Qwen3.6-27B-4bit\",\"messages\":[{
 
 ```bash
 cd ~/local-llm-workspace
-chmod +x ralph_launcher.bash start_headroom.sh
-./ralph_launcher.bash          # terminal 1
+chmod +x kowalski_launcher.bash start_headroom.sh
+./kowalski_launcher.bash          # terminal 1
 ./start_dashboard.sh           # terminal 2 (optional)
 ```
 
 ### What to expect now (and the one caveat)
 
-- **Task 9** runs as a single direct call: the dflash log should show a small prompt (a few hundred tokens + `map.js`), not 22–34k, and `ghosts.js` is written by Ralph and gated by `node --check`. No tool loop, no max-turns, and the 12 GB cache keeps `mlx_peak` well under the 51.8 GB wired limit, so **no more Metal OOM**.
+- **Task 9** runs as a single direct call: the dflash log should show a small prompt (a few hundred tokens + `map.js`), not 22–34k, and `ghosts.js` is written by Kowalski and gated by `node --check`. No tool loop, no max-turns, and the 12 GB cache keeps `mlx_peak` well under the 51.8 GB wired limit, so **no more Metal OOM**.
 - **Caveat for the modify tasks (10–22):** direct mode regenerates *one whole file* per task. For each modify task the target file is in `context` and the prompt says "preserve all existing functionality and add X," but a local 27B can still occasionally drop an earlier feature when it rewrites. That's why every task is git-checkpointed — if task 11 regresses something from task 10, `git -C pacman_clone reset --hard HEAD~1` rolls it back, and you can re-run. If a task genuinely needs two files edited together (e.g., a future cross-file change), split it into two single-file direct tasks rather than reaching for the agent, which is what kept crashing.
 
 Want me to add a tiny `--dry-run` flag to `run_direct_task` that prints the assembled prompt + estimated token count per task (without calling the model), so you can sanity-check the `context` sizes before a full run?
@@ -660,7 +660,7 @@ Your diagnosis is exactly right. `ghosts.js` grew 7.5 KB → 15 KB, and a 15 KB 
 
 ## Fix 1 — raise the server cap
 
-In `ralph_loop.py`, `DFLASH_CMD`, bump `--max-tokens` so the request isn't clamped:
+In `kowalski_loop.py`, `DFLASH_CMD`, bump `--max-tokens` so the request isn't clamped:
 
 ```python
     "--max-tokens", "8192",
@@ -708,14 +708,14 @@ MAX_CONTINUATIONS = 6   # add near the top with the other constants
             {"role": "user", "content": user},
         ]
         max_tokens = task.get("max_tokens", 8192)
-        print(f"✍️  [Ralph] Direct-generating {out_file} (context: {context or 'none'})")
+        print(f"✍️  [Kowalski] Direct-generating {out_file} (context: {context or 'none'})")
 
         full = ""
         for rnd in range(MAX_CONTINUATIONS):
             try:
                 piece, finish = self._post_chat(messages, max_tokens)
             except Exception as e:
-                print(f"❌ [Ralph] Direct call failed: {e}")
+                print(f"❌ [Kowalski] Direct call failed: {e}")
                 return "TIMEOUT"
             full += piece
             if finish != "length":           # natural stop → done
@@ -726,12 +726,12 @@ MAX_CONTINUATIONS = 6   # add near the top with the other constants
                 "Continue the file from EXACTLY where you stopped. Do NOT repeat any previous "
                 "lines, do NOT add fences or commentary — output only the remaining raw content."})
         else:
-            print("⚠️  [Ralph] Still truncated after continuations; writing partial (verify will catch it).")
+            print("⚠️  [Kowalski] Still truncated after continuations; writing partial (verify will catch it).")
 
         code = self._strip_fences(full)
         with open(os.path.join(DEV_ROOT, out_file), "w") as f:
             f.write(code)
-        print(f"📝 [Ralph] Wrote {out_file} ({len(code)} bytes).")
+        print(f"📝 [Kowalski] Wrote {out_file} ({len(code)} bytes).")
         return "OK" if self._verify(task) else "VERIFY_FAILED"
 ```
 
@@ -744,7 +744,7 @@ And in `run_plan`, pass the attempt so the retry hint kicks in:
                     outcome = self.execute_task(task, attempt=attempts)
 ```
 
-Why this works: a file under ~8k tokens now finishes in one shot (no seam risk). A bigger one comes back with `finish_reason == "length"`, and Ralph feeds the partial back and says "continue from where you stopped," stitching the pieces. The continuation reuses the same cached prefix in dflash, so it's fast. `node --check` still gates the final stitched result.
+Why this works: a file under ~8k tokens now finishes in one shot (no seam risk). A bigger one comes back with `finish_reason == "length"`, and Kowalski feeds the partial back and says "continue from where you stopped," stitching the pieces. The continuation reuses the same cached prefix in dflash, so it's fast. `node --check` still gates the final stitched result.
 
 > One honest caveat: whole-file regeneration makes the file grow every task, so input *and* output both climb. Continuation handles the output side; eventually (for very large files) you'd want to switch those tasks to the **agent** path (targeted `Edit`s instead of full rewrites). That's the natural answer to your next question.
 
@@ -758,7 +758,7 @@ You're right that everything became `direct` and nothing uses Claude Code. Here'
 
 ```python
 #!/usr/bin/env python3
-"""Autonomously build a Ralph plan.json from a high-level goal.
+"""Autonomously build a Kowalski plan.json from a high-level goal.
 Requires dflash running on :8787.  Usage: python build_plan.py "your project goal"
 """
 import json, os, sys, urllib.request
@@ -831,7 +831,7 @@ Workflow: start dflash (the launcher does, or run the `dflash serve …` line by
 
 ## Your doubt #2 — de-couple from `pacman_clone` + guarantee the ccr path
 
-- **The only project coupling is `llmstack_config.json`.** `ralph_loop.py` and `build_plan.py` already read `dev_root`/`plan_file` from it. The single remaining literal is the launcher's trust-seed fallback — change it so nothing assumes pacman:
+- **The only project coupling is `llmstack_config.json`.** `kowalski_loop.py` and `build_plan.py` already read `dev_root`/`plan_file` from it. The single remaining literal is the launcher's trust-seed fallback — change it so nothing assumes pacman:
 
 ```python
     dev_root = json.load(open("llmstack_config.json")).get("dev_root", ".")
@@ -854,7 +854,7 @@ Want me to add a `"strategy": "rewrite" | "edit"` field so large files (like `gh
 
 Both fixes make sense, and they're related: the **size-based auto-switch** stops big files from being truncated in the first place, and the **git-restore-before-retry** guarantees a failed attempt never poisons the next one with a corrupt file (which is exactly what was happening — attempt 2 read the broken `ghosts.js` as context). Here are the complete modified files.
 
-### `~/local-llm-workspace/ralph_loop.py` (complete)
+### `~/local-llm-workspace/kowalski_loop.py` (complete)
 
 ```python
 import subprocess
@@ -873,7 +873,7 @@ os.environ.update({
     "CLAUDE_ENABLE_BYTE_WATCHDOG": "0",
     "CLAUDE_ENABLE_STREAM_WATCHDOG": "0",
 })
-print(f"⏱️  [Ralph] API_TIMEOUT_MS={os.environ['API_TIMEOUT_MS']} forced.")
+print(f"⏱️  [Kowalski] API_TIMEOUT_MS={os.environ['API_TIMEOUT_MS']} forced.")
 
 # ---------------- CONFIG ----------------
 def load_config():
@@ -886,9 +886,9 @@ def load_config():
     if os.path.exists("llmstack_config.json"):
         with open("llmstack_config.json") as f:
             cfg.update(json.load(f))
-        print(f"🔧 [Ralph] Config loaded: Root='{cfg['dev_root']}', Plan='{cfg['plan_file']}'")
+        print(f"🔧 [Kowalski] Config loaded: Root='{cfg['dev_root']}', Plan='{cfg['plan_file']}'")
     else:
-        print("⚠️ [Ralph] No llmstack_config.json found, using defaults.")
+        print("⚠️ [Kowalski] No llmstack_config.json found, using defaults.")
     return cfg
 
 CONFIG     = load_config()
@@ -925,7 +925,7 @@ DFLASH_CMD = [
 ]
 
 
-class RalphSupervisor:
+class KowalskiSupervisor:
     def __init__(self):
         self.server_process = None
         self._stop = False
@@ -942,30 +942,30 @@ class RalphSupervisor:
     def start_server(self):
         if self.server_process and self.server_process.poll() is None:
             return
-        print("🚀 [Ralph] Starting DFlash server...")
+        print("🚀 [Kowalski] Starting DFlash server...")
         with open("dflash_server.log", "a") as log:
             self.server_process = subprocess.Popen(
                 DFLASH_CMD, stdout=log, stderr=subprocess.STDOUT, preexec_fn=os.setsid)
         self.wait_for_health()
 
     def wait_for_health(self, boot_timeout=600):
-        print("⏳ [Ralph] Waiting for model to load into RAM...")
+        print("⏳ [Kowalski] Waiting for model to load into RAM...")
         start = time.time()
         while not self._stop:
             if self._ping():
-                print("✅ [Ralph] Server online and healthy.")
+                print("✅ [Kowalski] Server online and healthy.")
                 return True
             if self.server_process.poll() is not None:
-                print("❌ [Ralph] Server died during boot. Restarting...")
+                print("❌ [Kowalski] Server died during boot. Restarting...")
                 self.server_process = None
                 return self.start_server()
             if time.time() - start > boot_timeout:
-                print("❌ [Ralph] Server boot timed out.")
+                print("❌ [Kowalski] Server boot timed out.")
                 return False
             time.sleep(5)
 
     def restart_server(self):
-        print("♻️  [Ralph] Hard-restarting DFlash...")
+        print("♻️  [Kowalski] Hard-restarting DFlash...")
         self.kill_server(); time.sleep(3); self.start_server()
 
     def kill_server(self):
@@ -1002,10 +1002,10 @@ class RalphSupervisor:
         self._git("add", ".gitignore")
         if self._git("rev-parse", "--verify", "-q", "HEAD").returncode != 0:
             self._git("add", "-A")
-            self._git("commit", "-q", "-m", "Ralph baseline")
+            self._git("commit", "-q", "-m", "Kowalski baseline")
         else:
-            self._git("commit", "-q", "-m", "Ralph: protect runtime state")  # no-op if nothing staged
-        print("📦 [Ralph] Git ready (last verified state protected).")
+            self._git("commit", "-q", "-m", "Kowalski: protect runtime state")  # no-op if nothing staged
+        print("📦 [Kowalski] Git ready (last verified state protected).")
 
     def restore_to_checkpoint(self, task=None):
         """Return the working tree to the last verified commit before an attempt,
@@ -1017,12 +1017,12 @@ class RalphSupervisor:
             p = os.path.join(DEV_ROOT, task["file"])
             if os.path.exists(p):
                 os.remove(p)
-                print(f"🗑️  [Ralph] No checkpoint yet — removed partial {task['file']}.")
+                print(f"🗑️  [Kowalski] No checkpoint yet — removed partial {task['file']}.")
 
     def git_checkpoint(self, task):
         self._git("add", "-A")               # respects .gitignore → never commits .claude/plan
-        self._git("commit", "-q", "-m", f"Ralph checkpoint: task {task.get('id')} verified")
-        print(f"📦 [Ralph] Git checkpoint saved for task {task.get('id')}.")
+        self._git("commit", "-q", "-m", f"Kowalski checkpoint: task {task.get('id')} verified")
+        print(f"📦 [Kowalski] Git checkpoint saved for task {task.get('id')}.")
 
     # ---------- executor selection (strategy: rewrite | edit | auto) ----------
     def _choose_executor(self, task):
@@ -1085,14 +1085,14 @@ class RalphSupervisor:
             {"role": "user", "content": user},
         ]
         max_tokens = task.get("max_tokens", 8192)
-        print(f"✍️  [Ralph] Direct-generating {out_file} (context: {context or 'none'})")
+        print(f"✍️  [Kowalski] Direct-generating {out_file} (context: {context or 'none'})")
 
         full = ""
         for rnd in range(MAX_CONTINUATIONS):
             try:
                 piece, finish = self._post_chat(messages, max_tokens)
             except Exception as e:
-                print(f"❌ [Ralph] Direct call failed: {e}")
+                print(f"❌ [Kowalski] Direct call failed: {e}")
                 return "TIMEOUT"
             full += piece
             if finish != "length":
@@ -1103,26 +1103,26 @@ class RalphSupervisor:
                 "Continue the file from EXACTLY where you stopped. Do NOT repeat any previous "
                 "lines, do NOT add fences or commentary — output only the remaining raw content."})
         else:
-            print("⚠️  [Ralph] Still truncated after continuations; writing partial (verify will catch it).")
+            print("⚠️  [Kowalski] Still truncated after continuations; writing partial (verify will catch it).")
 
         code = self._strip_fences(full)
         with open(os.path.join(DEV_ROOT, out_file), "w") as f:
             f.write(code)
-        print(f"📝 [Ralph] Wrote {out_file} ({len(code)} bytes).")
+        print(f"📝 [Kowalski] Wrote {out_file} ({len(code)} bytes).")
         return "OK" if self._verify(task) else "VERIFY_FAILED"
 
     # ---------- cache warm-up (agentic only) ----------
     def warm_up_cache(self):
-        print("🔥 [Ralph] Warming the agentic prefix cache...")
+        print("🔥 [Kowalski] Warming the agentic prefix cache...")
         try:
             subprocess.run(
                 ["ccr", "code", "-p", "Reply with OK only.",
                  "--output-format", "json",
                  "--permission-mode", CONFIG["permission_mode"], "--max-turns", "1"],
                 cwd=DEV_ROOT, capture_output=True, text=True, timeout=CONFIG["task_timeout"])
-            print("✅ [Ralph] Cache warm.")
+            print("✅ [Kowalski] Cache warm.")
         except Exception as e:
-            print(f"⚠️  [Ralph] Warm-up skipped ({e}).")
+            print(f"⚠️  [Kowalski] Warm-up skipped ({e}).")
 
     # ---------- AGENTIC execution (Claude Code via ccr) ----------
     def _retry_directive(self, attempt):
@@ -1147,7 +1147,7 @@ class RalphSupervisor:
         if tools:
             cmd += ["--allowedTools", *tools]
 
-        print(f"⚙️  [Ralph] Running Task {task.get('id')} (agentic) in {DEV_ROOT}")
+        print(f"⚙️  [Kowalski] Running Task {task.get('id')} (agentic) in {DEV_ROOT}")
         server_crashed = threading.Event()
         proc = subprocess.Popen(cmd, cwd=DEV_ROOT, text=True,
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, preexec_fn=os.setsid)
@@ -1164,7 +1164,7 @@ class RalphSupervisor:
         try:
             data = json.loads(stdout)
         except (json.JSONDecodeError, TypeError):
-            print("❌ [Ralph] Could not parse CLI JSON:", (stdout or stderr or "<empty>")[:300])
+            print("❌ [Kowalski] Could not parse CLI JSON:", (stdout or stderr or "<empty>")[:300])
             return "BAD_OUTPUT"
         result = None
         if isinstance(data, list):
@@ -1179,7 +1179,7 @@ class RalphSupervisor:
         if is_error or subtype != "success":
             detail = result.get("result") or result.get("error") or ""
             if isinstance(detail, (dict, list)): detail = json.dumps(detail)
-            print(f"ℹ️  [Ralph] is_error={is_error}, subtype={subtype}. Detail: {str(detail)[:300]}")
+            print(f"ℹ️  [Kowalski] is_error={is_error}, subtype={subtype}. Detail: {str(detail)[:300]}")
         if subtype in ("error_max_turns", "error_during_execution"):
             return "AGENT_ERROR"
         return "OK" if self._verify(task) else "VERIFY_FAILED"
@@ -1190,7 +1190,7 @@ class RalphSupervisor:
             if not self._ping():
                 fails += 1
                 if fails >= 3:
-                    print("🔥 [Ralph] DFlash died DURING the task — aborting agent.")
+                    print("🔥 [Kowalski] DFlash died DURING the task — aborting agent.")
                     server_crashed.set(); self._kill_proc(proc); return
             else:
                 fails = 0
@@ -1206,12 +1206,12 @@ class RalphSupervisor:
     def _verify(self, task):
         verify_cmd = task.get("verify")
         if not verify_cmd:
-            print("⚠️  [Ralph] No 'verify' for this task — skipping gate.")
+            print("⚠️  [Kowalski] No 'verify' for this task — skipping gate.")
             return True
-        print(f"🔎 [Ralph] Verifying: {verify_cmd}")
+        print(f"🔎 [Kowalski] Verifying: {verify_cmd}")
         r = subprocess.run(verify_cmd, shell=True, cwd=DEV_ROOT, capture_output=True, text=True)
         if r.returncode != 0:
-            print(f"❌ [Ralph] Verification FAILED:\n{r.stdout}\n{r.stderr}")
+            print(f"❌ [Kowalski] Verification FAILED:\n{r.stdout}\n{r.stderr}")
         return r.returncode == 0
 
     def mark_complete(self, plan, task):
@@ -1222,11 +1222,11 @@ class RalphSupervisor:
     # ---------- main loop ----------
     def run_plan(self):
         if not os.path.exists(PLAN_FILE):
-            print(f"❌ [Ralph] Plan file '{PLAN_FILE}' not found."); return
+            print(f"❌ [Kowalski] Plan file '{PLAN_FILE}' not found."); return
         with open(PLAN_FILE) as f:
             plan = json.load(f)
         tasks = plan.get("tasks", [])
-        print(f"📋 [Ralph] Loaded {len(tasks)} tasks.")
+        print(f"📋 [Kowalski] Loaded {len(tasks)} tasks.")
         self.ensure_git()
 
         pending = [t for t in tasks if t.get("status") != "completed"]
@@ -1235,7 +1235,7 @@ class RalphSupervisor:
 
         for task in tasks:
             if task.get("status") == "completed":
-                print(f"⏭️  [Ralph] Skipping Task {task.get('id')} (completed)"); continue
+                print(f"⏭️  [Kowalski] Skipping Task {task.get('id')} (completed)"); continue
 
             attempts, done = 0, False
             while not done and attempts < CONFIG["max_retries"] and not self._stop:
@@ -1245,7 +1245,7 @@ class RalphSupervisor:
                 self.restore_to_checkpoint(task)
                 attempts += 1
                 executor = self._choose_executor(task)
-                print(f"▶️  [Ralph] Task {task.get('id')} — attempt {attempts} ({executor})")
+                print(f"▶️  [Kowalski] Task {task.get('id')} — attempt {attempts} ({executor})")
                 if executor == "direct":
                     outcome = self.run_direct_task(task, attempt=attempts)
                 else:
@@ -1254,35 +1254,35 @@ class RalphSupervisor:
                 if outcome == "OK":
                     self.mark_complete(plan, task)
                     self.git_checkpoint(task)
-                    print(f"✅ [Ralph] Task {task.get('id')} COMPLETE & verified.")
+                    print(f"✅ [Kowalski] Task {task.get('id')} COMPLETE & verified.")
                     done = True
                 elif outcome == "SERVER_CRASH":
-                    print("♻️  [Ralph] Server crash — restarting; retry won't count.")
+                    print("♻️  [Kowalski] Server crash — restarting; retry won't count.")
                     self.restart_server()
                     attempts -= 1                    # a crash is not an agent failure
                 else:
-                    print(f"⚠️  [Ralph] Task {task.get('id')} -> {outcome}. Retry in 10s.")
+                    print(f"⚠️  [Kowalski] Task {task.get('id')} -> {outcome}. Retry in 10s.")
                     time.sleep(10)
 
             if not done:
                 self.restore_to_checkpoint(task)     # leave disk clean, not corrupted
-                print(f"🚨 [Ralph] Task {task.get('id')} NOT completed. Halting (NOT marked done).")
+                print(f"🚨 [Kowalski] Task {task.get('id')} NOT completed. Halting (NOT marked done).")
                 self.shutdown(); return
 
-        print("\n🎉 [Ralph] All tasks verified and committed!")
+        print("\n🎉 [Kowalski] All tasks verified and committed!")
         self.shutdown()
 
     def shutdown(self, signum=None, frame=None):
         self._stop = True
-        print("\n🛑 [Ralph] Shutting down infrastructure...")
+        print("\n🛑 [Kowalski] Shutting down infrastructure...")
         self.kill_server()
         sys.exit(0)
 
 
 if __name__ == "__main__":
-    ralph = RalphSupervisor()
-    ralph.start_server()
-    ralph.run_plan()
+    kowalski = KowalskiSupervisor()
+    kowalski.start_server()
+    kowalski.run_plan()
 ```
 
 ### `~/local-llm-workspace/llmstack_config.json` (complete)
@@ -1323,13 +1323,13 @@ git checkout HEAD -- ghosts.js && node --check ghosts.js && echo "✅ restored &
 
 You can also override the auto-decision per task: add `"strategy": "edit"` to force the agent path, or `"strategy": "rewrite"` to force direct regeneration regardless of size.
 
-No other files changed — `ralph_launcher.bash`, `start_headroom.sh`, the CCR config, `build_plan.py`, and the dashboard stay as they are. Want me to extend `build_plan.py` so it pre-marks tasks that modify a known-large file (like a central `game.js`/`ghosts.js`) with `"strategy": "edit"` up front, so they go straight to the agent without waiting to cross the size threshold mid-run?
+No other files changed — `kowalski_launcher.bash`, `start_headroom.sh`, the CCR config, `build_plan.py`, and the dashboard stay as they are. Want me to extend `build_plan.py` so it pre-marks tasks that modify a known-large file (like a central `game.js`/`ghosts.js`) with `"strategy": "edit"` up front, so they go straight to the agent without waiting to cross the size threshold mid-run?
 
 You're right on both counts, and they're real bugs in my logic — not your setup. The agent was making genuine incremental Edits, but (1) on `TIMEOUT` I rolled the file back instead of keeping the progress, and (2) my retry path *shrank* `max_turns` to 8 (`CONFIG["max_turns"] if attempt == 1 else 8`), so attempt 2 ran out of turns almost immediately. Both are now fixed: **valid progress is committed and resumed instead of discarded**, `max_turns` is large and never shrinks, and "made progress" attempts get their own budget so they don't burn the hard-fail retries.
 
 First: **Ctrl-C the current run**, paste the two files below, then re-run.
 
-### `~/local-llm-workspace/ralph_loop.py` (complete)
+### `~/local-llm-workspace/kowalski_loop.py` (complete)
 
 ```python
 import subprocess
@@ -1347,7 +1347,7 @@ os.environ.update({
     "CLAUDE_ENABLE_BYTE_WATCHDOG": "0",
     "CLAUDE_ENABLE_STREAM_WATCHDOG": "0",
 })
-print(f"⏱️  [Ralph] API_TIMEOUT_MS={os.environ['API_TIMEOUT_MS']} forced.")
+print(f"⏱️  [Kowalski] API_TIMEOUT_MS={os.environ['API_TIMEOUT_MS']} forced.")
 
 # ---------------- CONFIG ----------------
 def load_config():
@@ -1363,9 +1363,9 @@ def load_config():
     if os.path.exists("llmstack_config.json"):
         with open("llmstack_config.json") as f:
             cfg.update(json.load(f))
-        print(f"🔧 [Ralph] Config loaded: Root='{cfg['dev_root']}', Plan='{cfg['plan_file']}'")
+        print(f"🔧 [Kowalski] Config loaded: Root='{cfg['dev_root']}', Plan='{cfg['plan_file']}'")
     else:
-        print("⚠️ [Ralph] No llmstack_config.json found, using defaults.")
+        print("⚠️ [Kowalski] No llmstack_config.json found, using defaults.")
     return cfg
 
 CONFIG     = load_config()
@@ -1402,7 +1402,7 @@ DFLASH_CMD = [
 ]
 
 
-class RalphSupervisor:
+class KowalskiSupervisor:
     def __init__(self):
         self.server_process = None
         self._stop = False
@@ -1419,30 +1419,30 @@ class RalphSupervisor:
     def start_server(self):
         if self.server_process and self.server_process.poll() is None:
             return
-        print("🚀 [Ralph] Starting DFlash server...")
+        print("🚀 [Kowalski] Starting DFlash server...")
         with open("dflash_server.log", "a") as log:
             self.server_process = subprocess.Popen(
                 DFLASH_CMD, stdout=log, stderr=subprocess.STDOUT, preexec_fn=os.setsid)
         self.wait_for_health()
 
     def wait_for_health(self, boot_timeout=600):
-        print("⏳ [Ralph] Waiting for model to load into RAM...")
+        print("⏳ [Kowalski] Waiting for model to load into RAM...")
         start = time.time()
         while not self._stop:
             if self._ping():
-                print("✅ [Ralph] Server online and healthy.")
+                print("✅ [Kowalski] Server online and healthy.")
                 return True
             if self.server_process.poll() is not None:
-                print("❌ [Ralph] Server died during boot. Restarting...")
+                print("❌ [Kowalski] Server died during boot. Restarting...")
                 self.server_process = None
                 return self.start_server()
             if time.time() - start > boot_timeout:
-                print("❌ [Ralph] Server boot timed out.")
+                print("❌ [Kowalski] Server boot timed out.")
                 return False
             time.sleep(5)
 
     def restart_server(self):
-        print("♻️  [Ralph] Hard-restarting DFlash...")
+        print("♻️  [Kowalski] Hard-restarting DFlash...")
         self.kill_server(); time.sleep(3); self.start_server()
 
     def kill_server(self):
@@ -1474,10 +1474,10 @@ class RalphSupervisor:
         self._git("rm", "-r", "--cached", "-q", "--ignore-unmatch", ".claude")
         self._git("add", ".gitignore")
         if self._git("rev-parse", "--verify", "-q", "HEAD").returncode != 0:
-            self._git("add", "-A"); self._git("commit", "-q", "-m", "Ralph baseline")
+            self._git("add", "-A"); self._git("commit", "-q", "-m", "Kowalski baseline")
         else:
-            self._git("commit", "-q", "-m", "Ralph: protect runtime state")
-        print("📦 [Ralph] Git ready (last verified state protected).")
+            self._git("commit", "-q", "-m", "Kowalski: protect runtime state")
+        print("📦 [Kowalski] Git ready (last verified state protected).")
 
     def restore_to_checkpoint(self, task=None):
         if self._git("rev-parse", "--verify", "-q", "HEAD").returncode == 0:
@@ -1487,16 +1487,16 @@ class RalphSupervisor:
             p = os.path.join(DEV_ROOT, task["file"])
             if os.path.exists(p):
                 os.remove(p)
-                print(f"🗑️  [Ralph] No checkpoint yet — removed partial {task['file']}.")
+                print(f"🗑️  [Kowalski] No checkpoint yet — removed partial {task['file']}.")
 
     def git_checkpoint(self, task, label="verified"):
         self._git("add", "-A")
-        self._git("commit", "-q", "-m", f"Ralph: task {task.get('id')} {label}")
+        self._git("commit", "-q", "-m", f"Kowalski: task {task.get('id')} {label}")
 
     def _wip_commit(self, task):
         """Persist valid-but-incomplete progress so a timeout/crash can't lose it."""
         self.git_checkpoint(task, label="WIP (resumable)")
-        print(f"💾 [Ralph] Progress on task {task.get('id')} saved (WIP commit).")
+        print(f"💾 [Kowalski] Progress on task {task.get('id')} saved (WIP commit).")
 
     # ---------- validity check ----------
     def _syntax_ok(self, task):
@@ -1569,13 +1569,13 @@ class RalphSupervisor:
             {"role": "user", "content": user},
         ]
         max_tokens = task.get("max_tokens", 8192)
-        print(f"✍️  [Ralph] Direct-generating {out_file} (context: {context or 'none'})")
+        print(f"✍️  [Kowalski] Direct-generating {out_file} (context: {context or 'none'})")
         full = ""
         for rnd in range(MAX_CONTINUATIONS):
             try:
                 piece, finish = self._post_chat(messages, max_tokens)
             except Exception as e:
-                print(f"❌ [Ralph] Direct call failed: {e}")
+                print(f"❌ [Kowalski] Direct call failed: {e}")
                 return "TIMEOUT"
             full += piece
             if finish != "length":
@@ -1588,19 +1588,19 @@ class RalphSupervisor:
         code = self._strip_fences(full)
         with open(os.path.join(DEV_ROOT, out_file), "w") as f:
             f.write(code)
-        print(f"📝 [Ralph] Wrote {out_file} ({len(code)} bytes).")
+        print(f"📝 [Kowalski] Wrote {out_file} ({len(code)} bytes).")
         return "OK" if self._verify(task) else "VERIFY_FAILED"
 
     # ---------- warm-up ----------
     def warm_up_cache(self):
-        print("🔥 [Ralph] Warming the agentic prefix cache...")
+        print("🔥 [Kowalski] Warming the agentic prefix cache...")
         try:
             subprocess.run(["ccr", "code", "-p", "Reply with OK only.", "--output-format", "json",
                             "--permission-mode", CONFIG["permission_mode"], "--max-turns", "1"],
                            cwd=DEV_ROOT, capture_output=True, text=True, timeout=CONFIG["task_timeout"])
-            print("✅ [Ralph] Cache warm.")
+            print("✅ [Kowalski] Cache warm.")
         except Exception as e:
-            print(f"⚠️  [Ralph] Warm-up skipped ({e}).")
+            print(f"⚠️  [Kowalski] Warm-up skipped ({e}).")
 
     # ---------- AGENTIC execution ----------
     def execute_task(self, task, attempt=1, resuming=False):
@@ -1622,7 +1622,7 @@ class RalphSupervisor:
         if tools:
             cmd += ["--allowedTools", *tools]
 
-        print(f"⚙️  [Ralph] Running Task {task.get('id')} (agentic, turns={CONFIG['max_turns']}) in {DEV_ROOT}")
+        print(f"⚙️  [Kowalski] Running Task {task.get('id')} (agentic, turns={CONFIG['max_turns']}) in {DEV_ROOT}")
         server_crashed = threading.Event()
         proc = subprocess.Popen(cmd, cwd=DEV_ROOT, text=True,
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, preexec_fn=os.setsid)
@@ -1639,7 +1639,7 @@ class RalphSupervisor:
         try:
             data = json.loads(stdout)
         except (json.JSONDecodeError, TypeError):
-            print("❌ [Ralph] Could not parse CLI JSON:", (stdout or stderr or "<empty>")[:300])
+            print("❌ [Kowalski] Could not parse CLI JSON:", (stdout or stderr or "<empty>")[:300])
             return "BAD_OUTPUT"
         result = None
         if isinstance(data, list):
@@ -1654,7 +1654,7 @@ class RalphSupervisor:
         if is_error or subtype != "success":
             detail = result.get("result") or result.get("error") or ""
             if isinstance(detail, (dict, list)): detail = json.dumps(detail)
-            print(f"ℹ️  [Ralph] is_error={is_error}, subtype={subtype}. Detail: {str(detail)[:300]}")
+            print(f"ℹ️  [Kowalski] is_error={is_error}, subtype={subtype}. Detail: {str(detail)[:300]}")
         if subtype in ("error_max_turns", "error_during_execution"):
             return "AGENT_ERROR"
         return "OK" if self._verify(task) else "VERIFY_FAILED"
@@ -1665,7 +1665,7 @@ class RalphSupervisor:
             if not self._ping():
                 fails += 1
                 if fails >= 3:
-                    print("🔥 [Ralph] DFlash died DURING the task — aborting agent.")
+                    print("🔥 [Kowalski] DFlash died DURING the task — aborting agent.")
                     server_crashed.set(); self._kill_proc(proc); return
             else:
                 fails = 0
@@ -1680,12 +1680,12 @@ class RalphSupervisor:
     def _verify(self, task):
         verify_cmd = task.get("verify")
         if not verify_cmd:
-            print("⚠️  [Ralph] No 'verify' for this task — skipping gate.")
+            print("⚠️  [Kowalski] No 'verify' for this task — skipping gate.")
             return True
-        print(f"🔎 [Ralph] Verifying: {verify_cmd}")
+        print(f"🔎 [Kowalski] Verifying: {verify_cmd}")
         r = subprocess.run(verify_cmd, shell=True, cwd=DEV_ROOT, capture_output=True, text=True)
         if r.returncode != 0:
-            print(f"❌ [Ralph] Verification FAILED:\n{r.stdout}\n{r.stderr}")
+            print(f"❌ [Kowalski] Verification FAILED:\n{r.stdout}\n{r.stderr}")
         return r.returncode == 0
 
     def mark_complete(self, plan, task):
@@ -1696,11 +1696,11 @@ class RalphSupervisor:
     # ---------- main loop ----------
     def run_plan(self):
         if not os.path.exists(PLAN_FILE):
-            print(f"❌ [Ralph] Plan file '{PLAN_FILE}' not found."); return
+            print(f"❌ [Kowalski] Plan file '{PLAN_FILE}' not found."); return
         with open(PLAN_FILE) as f:
             plan = json.load(f)
         tasks = plan.get("tasks", [])
-        print(f"📋 [Ralph] Loaded {len(tasks)} tasks.")
+        print(f"📋 [Kowalski] Loaded {len(tasks)} tasks.")
         self.ensure_git()
 
         pending = [t for t in tasks if t.get("status") != "completed"]
@@ -1709,13 +1709,13 @@ class RalphSupervisor:
 
         for task in tasks:
             if task.get("status") == "completed":
-                print(f"⏭️  [Ralph] Skipping Task {task.get('id')} (completed)"); continue
+                print(f"⏭️  [Kowalski] Skipping Task {task.get('id')} (completed)"); continue
 
             executor = self._choose_executor(task)
 
             # Clean only a CORRUPT leftover at task start — never discard valid progress.
             if executor == "agent" and not self._syntax_ok(task):
-                print("🧹 [Ralph] Corrupt leftover detected — restoring to last checkpoint.")
+                print("🧹 [Kowalski] Corrupt leftover detected — restoring to last checkpoint.")
                 self.restore_to_checkpoint(task)
 
             hard_fails = resumes = 0
@@ -1730,7 +1730,7 @@ class RalphSupervisor:
 
                 n = hard_fails + resumes + 1
                 tag = executor + (", resume" if resumes else "")
-                print(f"▶️  [Ralph] Task {task.get('id')} — attempt {n} ({tag})")
+                print(f"▶️  [Kowalski] Task {task.get('id')} — attempt {n} ({tag})")
 
                 if executor == "direct":
                     outcome = self.run_direct_task(task, attempt=n)
@@ -1740,11 +1740,11 @@ class RalphSupervisor:
                 if outcome == "OK":
                     self.mark_complete(plan, task)
                     self.git_checkpoint(task, label="verified")
-                    print(f"✅ [Ralph] Task {task.get('id')} COMPLETE & verified.")
+                    print(f"✅ [Kowalski] Task {task.get('id')} COMPLETE & verified.")
                     done = True
 
                 elif outcome == "SERVER_CRASH":
-                    print("♻️  [Ralph] Server crash — restarting (not counted).")
+                    print("♻️  [Kowalski] Server crash — restarting (not counted).")
                     self.restart_server()
                     if executor == "agent" and self._syntax_ok(task):
                         self._wip_commit(task)
@@ -1753,45 +1753,45 @@ class RalphSupervisor:
                     if executor == "agent" and self._syntax_ok(task):
                         self._wip_commit(task)
                         resumes += 1
-                        print(f"⏸️  [Ralph] {outcome} but file is VALID — progress kept, RESUMING "
+                        print(f"⏸️  [Kowalski] {outcome} but file is VALID — progress kept, RESUMING "
                               f"(resume {resumes}/{CONFIG['max_resumes']}).")
                     else:
                         hard_fails += 1
                         self.restore_to_checkpoint(task)
-                        print(f"⚠️  [Ralph] {outcome} (no usable progress) — rolled back "
+                        print(f"⚠️  [Kowalski] {outcome} (no usable progress) — rolled back "
                               f"({hard_fails}/{CONFIG['max_retries']}).")
                         time.sleep(5)
 
                 else:  # VERIFY_FAILED / BAD_OUTPUT
                     hard_fails += 1
                     self.restore_to_checkpoint(task)
-                    print(f"⚠️  [Ralph] {outcome} — rolled back ({hard_fails}/{CONFIG['max_retries']}).")
+                    print(f"⚠️  [Kowalski] {outcome} — rolled back ({hard_fails}/{CONFIG['max_retries']}).")
                     time.sleep(5)
 
             if not done:
                 if executor == "agent" and self._syntax_ok(task):
                     self._wip_commit(task)
-                    print(f"🚧 [Ralph] Task {task.get('id')} INCOMPLETE — valid progress KEPT as WIP. "
+                    print(f"🚧 [Kowalski] Task {task.get('id')} INCOMPLETE — valid progress KEPT as WIP. "
                           f"Re-run to resume from here. Halting.")
                 else:
                     self.restore_to_checkpoint(task)
-                    print(f"🚨 [Ralph] Task {task.get('id')} NOT completed — rolled back. Halting.")
+                    print(f"🚨 [Kowalski] Task {task.get('id')} NOT completed — rolled back. Halting.")
                 self.shutdown(); return
 
-        print("\n🎉 [Ralph] All tasks verified and committed!")
+        print("\n🎉 [Kowalski] All tasks verified and committed!")
         self.shutdown()
 
     def shutdown(self, signum=None, frame=None):
         self._stop = True
-        print("\n🛑 [Ralph] Shutting down infrastructure...")
+        print("\n🛑 [Kowalski] Shutting down infrastructure...")
         self.kill_server()
         sys.exit(0)
 
 
 if __name__ == "__main__":
-    ralph = RalphSupervisor()
-    ralph.start_server()
-    ralph.run_plan()
+    kowalski = KowalskiSupervisor()
+    kowalski.start_server()
+    kowalski.run_plan()
 ```
 
 ### `~/local-llm-workspace/llmstack_config.json` (complete)
@@ -1811,14 +1811,14 @@ if __name__ == "__main__":
 
 ### What changed and what to expect
 
-- **Timeout no longer loses work.** When an agent attempt times out (or hits max turns) and the file still *parses*, Ralph commits a **WIP checkpoint** and the next attempt **resumes** — the agent is told the file "already contains partial work, continue and complete it." Over a few attempts a big feature converges instead of restarting each time.
+- **Timeout no longer loses work.** When an agent attempt times out (or hits max turns) and the file still *parses*, Kowalski commits a **WIP checkpoint** and the next attempt **resumes** — the agent is told the file "already contains partial work, continue and complete it." Over a few attempts a big feature converges instead of restarting each time.
 - **`max_turns` is now 150 and never shrinks.** The "counter didn't reset" was my retry code dropping it to 8 — gone. Each attempt is a fresh `-p` call with the full budget.
 - **Separate budgets.** `max_resumes` (8) governs progress-preserving continuations; `max_retries` (3) governs *hard* failures (corrupt output / verify breakage). Making progress no longer eats your retry budget, and an endless no-progress loop still stops.
 - **Rollback is now surgical.** It only happens on a *corrupt* result (syntax breakage / bad output) or for direct whole-file rewrites — never when valid agentic progress exists. On final give-up, valid WIP is **kept** (committed), so re-running picks up exactly where it stopped.
 
 One honest note: the work from that first attempt before the old code reset it is unfortunately gone (it was discarded by an uncommitted `git reset --hard`, so it's not in history). But from here forward every valid increment is committed, so a timeout costs you a re-read, not the work. If you want even finer-grained safety, lower `task_timeout` (e.g. to `900`) so it WIP-commits and resumes every ~15 minutes instead of 30.
 
-Here's the complete `ralph_loop.py` with the two fixes (`_evaluate` clean-finish/timeout handling and `_verify` feature-marker gate) folded into the full file.
+Here's the complete `kowalski_loop.py` with the two fixes (`_evaluate` clean-finish/timeout handling and `_verify` feature-marker gate) folded into the full file.
 
 ```python
 import subprocess
@@ -1837,7 +1837,7 @@ os.environ.update({
     "CLAUDE_ENABLE_BYTE_WATCHDOG": "0",
     "CLAUDE_ENABLE_STREAM_WATCHDOG": "0",
 })
-print(f"⏱️  [Ralph] API_TIMEOUT_MS={os.environ['API_TIMEOUT_MS']} forced.")
+print(f"⏱️  [Kowalski] API_TIMEOUT_MS={os.environ['API_TIMEOUT_MS']} forced.")
 
 # ---------------- CONFIG ----------------
 def load_config():
@@ -1853,9 +1853,9 @@ def load_config():
     if os.path.exists("llmstack_config.json"):
         with open("llmstack_config.json") as f:
             cfg.update(json.load(f))
-        print(f"🔧 [Ralph] Config loaded: Root='{cfg['dev_root']}', Plan='{cfg['plan_file']}'")
+        print(f"🔧 [Kowalski] Config loaded: Root='{cfg['dev_root']}', Plan='{cfg['plan_file']}'")
     else:
-        print("⚠️ [Ralph] No llmstack_config.json found, using defaults.")
+        print("⚠️ [Kowalski] No llmstack_config.json found, using defaults.")
     return cfg
 
 CONFIG     = load_config()
@@ -1892,7 +1892,7 @@ DFLASH_CMD = [
 ]
 
 
-class RalphSupervisor:
+class KowalskiSupervisor:
     def __init__(self):
         self.server_process = None
         self._stop = False
@@ -1909,30 +1909,30 @@ class RalphSupervisor:
     def start_server(self):
         if self.server_process and self.server_process.poll() is None:
             return
-        print("🚀 [Ralph] Starting DFlash server...")
+        print("🚀 [Kowalski] Starting DFlash server...")
         with open("dflash_server.log", "a") as log:
             self.server_process = subprocess.Popen(
                 DFLASH_CMD, stdout=log, stderr=subprocess.STDOUT, preexec_fn=os.setsid)
         self.wait_for_health()
 
     def wait_for_health(self, boot_timeout=600):
-        print("⏳ [Ralph] Waiting for model to load into RAM...")
+        print("⏳ [Kowalski] Waiting for model to load into RAM...")
         start = time.time()
         while not self._stop:
             if self._ping():
-                print("✅ [Ralph] Server online and healthy.")
+                print("✅ [Kowalski] Server online and healthy.")
                 return True
             if self.server_process.poll() is not None:
-                print("❌ [Ralph] Server died during boot. Restarting...")
+                print("❌ [Kowalski] Server died during boot. Restarting...")
                 self.server_process = None
                 return self.start_server()
             if time.time() - start > boot_timeout:
-                print("❌ [Ralph] Server boot timed out.")
+                print("❌ [Kowalski] Server boot timed out.")
                 return False
             time.sleep(5)
 
     def restart_server(self):
-        print("♻️  [Ralph] Hard-restarting DFlash...")
+        print("♻️  [Kowalski] Hard-restarting DFlash...")
         self.kill_server(); time.sleep(3); self.start_server()
 
     def kill_server(self):
@@ -1964,10 +1964,10 @@ class RalphSupervisor:
         self._git("rm", "-r", "--cached", "-q", "--ignore-unmatch", ".claude")
         self._git("add", ".gitignore")
         if self._git("rev-parse", "--verify", "-q", "HEAD").returncode != 0:
-            self._git("add", "-A"); self._git("commit", "-q", "-m", "Ralph baseline")
+            self._git("add", "-A"); self._git("commit", "-q", "-m", "Kowalski baseline")
         else:
-            self._git("commit", "-q", "-m", "Ralph: protect runtime state")
-        print("📦 [Ralph] Git ready (last verified state protected).")
+            self._git("commit", "-q", "-m", "Kowalski: protect runtime state")
+        print("📦 [Kowalski] Git ready (last verified state protected).")
 
     def restore_to_checkpoint(self, task=None):
         if self._git("rev-parse", "--verify", "-q", "HEAD").returncode == 0:
@@ -1977,16 +1977,16 @@ class RalphSupervisor:
             p = os.path.join(DEV_ROOT, task["file"])
             if os.path.exists(p):
                 os.remove(p)
-                print(f"🗑️  [Ralph] No checkpoint yet — removed partial {task['file']}.")
+                print(f"🗑️  [Kowalski] No checkpoint yet — removed partial {task['file']}.")
 
     def git_checkpoint(self, task, label="verified"):
         self._git("add", "-A")
-        self._git("commit", "-q", "-m", f"Ralph: task {task.get('id')} {label}")
+        self._git("commit", "-q", "-m", f"Kowalski: task {task.get('id')} {label}")
 
     def _wip_commit(self, task):
         """Persist valid-but-incomplete progress so a timeout/crash can't lose it."""
         self.git_checkpoint(task, label="WIP (resumable)")
-        print(f"💾 [Ralph] Progress on task {task.get('id')} saved (WIP commit).")
+        print(f"💾 [Kowalski] Progress on task {task.get('id')} saved (WIP commit).")
 
     # ---------- validity check ----------
     def _syntax_ok(self, task):
@@ -2059,13 +2059,13 @@ class RalphSupervisor:
             {"role": "user", "content": user},
         ]
         max_tokens = task.get("max_tokens", 8192)
-        print(f"✍️  [Ralph] Direct-generating {out_file} (context: {context or 'none'})")
+        print(f"✍️  [Kowalski] Direct-generating {out_file} (context: {context or 'none'})")
         full = ""
         for rnd in range(MAX_CONTINUATIONS):
             try:
                 piece, finish = self._post_chat(messages, max_tokens)
             except Exception as e:
-                print(f"❌ [Ralph] Direct call failed: {e}")
+                print(f"❌ [Kowalski] Direct call failed: {e}")
                 return "TIMEOUT"
             full += piece
             if finish != "length":
@@ -2076,24 +2076,24 @@ class RalphSupervisor:
                 "Continue the file from EXACTLY where you stopped. Do NOT repeat any previous "
                 "lines, do NOT add fences or commentary — output only the remaining raw content."})
         else:
-            print("⚠️  [Ralph] Still truncated after continuations; writing partial (verify will catch it).")
+            print("⚠️  [Kowalski] Still truncated after continuations; writing partial (verify will catch it).")
 
         code = self._strip_fences(full)
         with open(os.path.join(DEV_ROOT, out_file), "w") as f:
             f.write(code)
-        print(f"📝 [Ralph] Wrote {out_file} ({len(code)} bytes).")
+        print(f"📝 [Kowalski] Wrote {out_file} ({len(code)} bytes).")
         return "OK" if self._verify(task) else "VERIFY_FAILED"
 
     # ---------- warm-up ----------
     def warm_up_cache(self):
-        print("🔥 [Ralph] Warming the agentic prefix cache...")
+        print("🔥 [Kowalski] Warming the agentic prefix cache...")
         try:
             subprocess.run(["ccr", "code", "-p", "Reply with OK only.", "--output-format", "json",
                             "--permission-mode", CONFIG["permission_mode"], "--max-turns", "1"],
                            cwd=DEV_ROOT, capture_output=True, text=True, timeout=CONFIG["task_timeout"])
-            print("✅ [Ralph] Cache warm.")
+            print("✅ [Kowalski] Cache warm.")
         except Exception as e:
-            print(f"⚠️  [Ralph] Warm-up skipped ({e}).")
+            print(f"⚠️  [Kowalski] Warm-up skipped ({e}).")
 
     # ---------- AGENTIC execution ----------
     def execute_task(self, task, attempt=1, resuming=False):
@@ -2115,7 +2115,7 @@ class RalphSupervisor:
         if tools:
             cmd += ["--allowedTools", *tools]
 
-        print(f"⚙️  [Ralph] Running Task {task.get('id')} (agentic, turns={CONFIG['max_turns']}) in {DEV_ROOT}")
+        print(f"⚙️  [Kowalski] Running Task {task.get('id')} (agentic, turns={CONFIG['max_turns']}) in {DEV_ROOT}")
         server_crashed = threading.Event()
         proc = subprocess.Popen(cmd, cwd=DEV_ROOT, text=True,
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, preexec_fn=os.setsid)
@@ -2132,7 +2132,7 @@ class RalphSupervisor:
         try:
             data = json.loads(stdout)
         except (json.JSONDecodeError, TypeError):
-            print("❌ [Ralph] Could not parse CLI JSON:", (stdout or stderr or "<empty>")[:300])
+            print("❌ [Kowalski] Could not parse CLI JSON:", (stdout or stderr or "<empty>")[:300])
             return "BAD_OUTPUT"
         result = None
         if isinstance(data, list):
@@ -2153,13 +2153,13 @@ class RalphSupervisor:
 
         # Hard session failures → resume.
         if subtype in ("error_max_turns", "error_during_execution"):
-            print(f"ℹ️  [Ralph] subtype={subtype}. Detail: {detail[:200]}")
+            print(f"ℹ️  [Kowalski] subtype={subtype}. Detail: {detail[:200]}")
             return "AGENT_ERROR"
 
         # A flagged error (e.g. a mid-loop 'Request timed out') is NOT a clean finish.
         # NEVER trust it as done — route to resume so progress is preserved & re-checked.
         if is_error or subtype != "success":
-            print(f"ℹ️  [Ralph] DIRTY finish: is_error={is_error}, subtype={subtype}. Detail: {detail[:200]}")
+            print(f"ℹ️  [Kowalski] DIRTY finish: is_error={is_error}, subtype={subtype}. Detail: {detail[:200]}")
             low = detail.lower()
             if "tim" in low and "out" in low:        # 'timed out' / 'timeout'
                 return "TIMEOUT"
@@ -2174,7 +2174,7 @@ class RalphSupervisor:
             if not self._ping():
                 fails += 1
                 if fails >= 3:
-                    print("🔥 [Ralph] DFlash died DURING the task — aborting agent.")
+                    print("🔥 [Kowalski] DFlash died DURING the task — aborting agent.")
                     server_crashed.set(); self._kill_proc(proc); return
             else:
                 fails = 0
@@ -2190,10 +2190,10 @@ class RalphSupervisor:
     def _verify(self, task):
         verify_cmd = task.get("verify")
         if verify_cmd:
-            print(f"🔎 [Ralph] Verifying: {verify_cmd}")
+            print(f"🔎 [Kowalski] Verifying: {verify_cmd}")
             r = subprocess.run(verify_cmd, shell=True, cwd=DEV_ROOT, capture_output=True, text=True)
             if r.returncode != 0:
-                print(f"❌ [Ralph] Syntax/verify FAILED:\n{r.stdout}\n{r.stderr}")
+                print(f"❌ [Kowalski] Syntax/verify FAILED:\n{r.stdout}\n{r.stderr}")
                 return False
 
         # Feature-presence gate: a valid-but-incomplete file can't false-pass.
@@ -2205,12 +2205,12 @@ class RalphSupervisor:
                        if os.path.exists(p) else "")
             missing = [s for s in expect if s.lower() not in content]
             if missing:
-                print(f"❌ [Ralph] Feature markers MISSING in {target}: {missing}")
+                print(f"❌ [Kowalski] Feature markers MISSING in {target}: {missing}")
                 return False
-            print(f"✅ [Ralph] Feature markers present: {expect}")
+            print(f"✅ [Kowalski] Feature markers present: {expect}")
 
         if not verify_cmd and not expect:
-            print("⚠️  [Ralph] No verify/expect for this task — skipping gate.")
+            print("⚠️  [Kowalski] No verify/expect for this task — skipping gate.")
         return True
 
     def mark_complete(self, plan, task):
@@ -2221,11 +2221,11 @@ class RalphSupervisor:
     # ---------- main loop ----------
     def run_plan(self):
         if not os.path.exists(PLAN_FILE):
-            print(f"❌ [Ralph] Plan file '{PLAN_FILE}' not found."); return
+            print(f"❌ [Kowalski] Plan file '{PLAN_FILE}' not found."); return
         with open(PLAN_FILE) as f:
             plan = json.load(f)
         tasks = plan.get("tasks", [])
-        print(f"📋 [Ralph] Loaded {len(tasks)} tasks.")
+        print(f"📋 [Kowalski] Loaded {len(tasks)} tasks.")
         self.ensure_git()
 
         pending = [t for t in tasks if t.get("status") != "completed"]
@@ -2234,13 +2234,13 @@ class RalphSupervisor:
 
         for task in tasks:
             if task.get("status") == "completed":
-                print(f"⏭️  [Ralph] Skipping Task {task.get('id')} (completed)"); continue
+                print(f"⏭️  [Kowalski] Skipping Task {task.get('id')} (completed)"); continue
 
             executor = self._choose_executor(task)
 
             # Clean only a CORRUPT leftover at task start — never discard valid progress.
             if executor == "agent" and not self._syntax_ok(task):
-                print("🧹 [Ralph] Corrupt leftover detected — restoring to last checkpoint.")
+                print("🧹 [Kowalski] Corrupt leftover detected — restoring to last checkpoint.")
                 self.restore_to_checkpoint(task)
 
             hard_fails = resumes = 0
@@ -2255,7 +2255,7 @@ class RalphSupervisor:
 
                 n = hard_fails + resumes + 1
                 tag = executor + (", resume" if resumes else "")
-                print(f"▶️  [Ralph] Task {task.get('id')} — attempt {n} ({tag})")
+                print(f"▶️  [Kowalski] Task {task.get('id')} — attempt {n} ({tag})")
 
                 if executor == "direct":
                     outcome = self.run_direct_task(task, attempt=n)
@@ -2265,11 +2265,11 @@ class RalphSupervisor:
                 if outcome == "OK":
                     self.mark_complete(plan, task)
                     self.git_checkpoint(task, label="verified")
-                    print(f"✅ [Ralph] Task {task.get('id')} COMPLETE & verified.")
+                    print(f"✅ [Kowalski] Task {task.get('id')} COMPLETE & verified.")
                     done = True
 
                 elif outcome == "SERVER_CRASH":
-                    print("♻️  [Ralph] Server crash — restarting (not counted).")
+                    print("♻️  [Kowalski] Server crash — restarting (not counted).")
                     self.restart_server()
                     if executor == "agent" and self._syntax_ok(task):
                         self._wip_commit(task)
@@ -2278,45 +2278,45 @@ class RalphSupervisor:
                     if executor == "agent" and self._syntax_ok(task):
                         self._wip_commit(task)
                         resumes += 1
-                        print(f"⏸️  [Ralph] {outcome} but file is VALID — progress kept, RESUMING "
+                        print(f"⏸️  [Kowalski] {outcome} but file is VALID — progress kept, RESUMING "
                               f"(resume {resumes}/{CONFIG['max_resumes']}).")
                     else:
                         hard_fails += 1
                         self.restore_to_checkpoint(task)
-                        print(f"⚠️  [Ralph] {outcome} (no usable progress) — rolled back "
+                        print(f"⚠️  [Kowalski] {outcome} (no usable progress) — rolled back "
                               f"({hard_fails}/{CONFIG['max_retries']}).")
                         time.sleep(5)
 
                 else:  # VERIFY_FAILED / BAD_OUTPUT
                     hard_fails += 1
                     self.restore_to_checkpoint(task)
-                    print(f"⚠️  [Ralph] {outcome} — rolled back ({hard_fails}/{CONFIG['max_retries']}).")
+                    print(f"⚠️  [Kowalski] {outcome} — rolled back ({hard_fails}/{CONFIG['max_retries']}).")
                     time.sleep(5)
 
             if not done:
                 if executor == "agent" and self._syntax_ok(task):
                     self._wip_commit(task)
-                    print(f"🚧 [Ralph] Task {task.get('id')} INCOMPLETE — valid progress KEPT as WIP. "
+                    print(f"🚧 [Kowalski] Task {task.get('id')} INCOMPLETE — valid progress KEPT as WIP. "
                           f"Re-run to resume from here. Halting.")
                 else:
                     self.restore_to_checkpoint(task)
-                    print(f"🚨 [Ralph] Task {task.get('id')} NOT completed — rolled back. Halting.")
+                    print(f"🚨 [Kowalski] Task {task.get('id')} NOT completed — rolled back. Halting.")
                 self.shutdown(); return
 
-        print("\n🎉 [Ralph] All tasks verified and committed!")
+        print("\n🎉 [Kowalski] All tasks verified and committed!")
         self.shutdown()
 
     def shutdown(self, signum=None, frame=None):
         self._stop = True
-        print("\n🛑 [Ralph] Shutting down infrastructure...")
+        print("\n🛑 [Kowalski] Shutting down infrastructure...")
         self.kill_server()
         sys.exit(0)
 
 
 if __name__ == "__main__":
-    ralph = RalphSupervisor()
-    ralph.start_server()
-    ralph.run_plan()
+    kowalski = KowalskiSupervisor()
+    kowalski.start_server()
+    kowalski.run_plan()
 ```
 
 This is the full file with both fixes in place:

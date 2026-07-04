@@ -47,7 +47,7 @@ Then proceed to **Phase 4** for IPC + remote control. **Phase 5** (dashboards) r
 
 ### What works well
 - Cleanly layered runtime architecture (DFlash → Headroom → CCR → Claude Code)
-- Ralph has a robust loop: 6 verification gates, git checkpoints, resume-on-timeout
+- Kowalski has a robust loop: 6 verification gates, git checkpoints, resume-on-timeout
 - Complete Rich TUI dashboard (DFlash + Headroom metrics)
 - Dual execution mode (direct generation + agentic via `ccr code`)
 - `build-plan.py` for autonomous plan generation
@@ -55,10 +55,10 @@ Then proceed to **Phase 4** for IPC + remote control. **Phase 5** (dashboards) r
 ### Critical weaknesses
 | Area | Problem |
 |------|---------|
-| **Monolithic scripts** | Launch logic, configuration, environment setup, and orchestration logic are tangled inside the same files (e.g. `ralph_loop.py` mixes config loading, server lifecycle, gates, executors; bash launchers duplicate the same env/trust/timeout setup) |
+| **Monolithic scripts** | Launch logic, configuration, environment setup, and orchestration logic are tangled inside the same files (e.g. `kowalski_loop.py` mixes config loading, server lifecycle, gates, executors; bash launchers duplicate the same env/trust/timeout setup) |
 | **Hardcoded model** | `Qwen3.6-27B-4bit` + draft `z-lab/Qwen3.6-27B-DFlash` wired into 6+ files |
 | **No model registry** | Cannot switch models without editing code |
-| **Duplicated boot logic** | Trust pre-seeding, CCR timeout patching, key unsetting, and Headroom boot are copy-pasted across `ralph_launcher.bash`, `ccr_interactive.bash`, `start_*.bash` |
+| **Duplicated boot logic** | Trust pre-seeding, CCR timeout patching, key unsetting, and Headroom boot are copy-pasted across `kowalski_launcher.bash`, `ccr_interactive.bash`, `start_*.bash` |
 | **Config not generalized** | `llmstack_config.json` hardcoded to `./pacman_clone` |
 | **Single loop strategy** | Only one-shot plan execution; no continuous/watch/supervised modes |
 | **No remote control** | Zero visibility unless sitting at the terminal |
@@ -66,7 +66,7 @@ Then proceed to **Phase 4** for IPC + remote control. **Phase 5** (dashboards) r
 | **Headroom out-of-tree** | `~/headroom-env` is a **separate Python 3.13 venv** (the project venv is 3.14); the real pip package is **`headroom-ai`**, invoked as the `headroom` executable |
 
 ### Root cause
-The project grew organically: launch concerns (env vars, trust, ports, timeouts), control concerns (start/stop/status), and **business logic** (the Ralph loop, the verification gates, the executors) are all interleaved. **The single most valuable refactor is to separate these layers** so every later feature (more models, more loop modes, Telegram, web dashboard) plugs into a stable core instead of patching tangled scripts.
+The project grew organically: launch concerns (env vars, trust, ports, timeouts), control concerns (start/stop/status), and **business logic** (the Kowalski loop, the verification gates, the executors) are all interleaved. **The single most valuable refactor is to separate these layers** so every later feature (more models, more loop modes, Telegram, web dashboard) plugs into a stable core instead of patching tangled scripts.
 
 ---
 
@@ -90,7 +90,7 @@ local-llm-workspace/
 │   │   ├── headroom_service.py   # wraps Headroom proxy
 │   │   └── ccr_service.py        # wraps CCR (config patch, restart)
 │   ├── core/                     # ORCHESTRATION LOGIC (business concern)
-│   │   ├── supervisor.py         # the loop driver (was RalphSupervisor)
+│   │   ├── supervisor.py         # the loop driver (was KowalskiSupervisor)
 │   │   ├── executors.py          # direct + agentic executors
 │   │   ├── gates.py              # the 6 verification gates (pluggable)
 │   │   ├── plan.py               # plan load/save/normalize
@@ -118,7 +118,7 @@ local-llm-workspace/
 │   ├── llmstack                  # → python -m llmstack.cli
 │   └── *.bash                    # kept as 5-line wrappers calling the CLI
 ├── llmstack_config.json             # config (now with models + modes sections)
-├── ralph_config.template.json
+├── kowalski_config.template.json
 └── install/                      # automation (done LAST)
     ├── install.sh
     ├── doctor.sh
@@ -233,23 +233,23 @@ Phase 0 is completed, with a few deliberate implementation differences from the 
 | # | Task | Status | Updated acceptance / notes |
 |---|------|--------|----------------------------|
 | 0.1 | Create `llmstack/` package skeleton with empty modules + `__init__.py` | ✅ Done | Package exists and is importable. |
-| 0.2 | Extract config loading from `ralph_loop.py` → `llmstack/config.py` (`load_config()`, validation, defaults, env derivation) | ✅ Done | `llmstack/config.py` is now the single config loader with normalization and env derivation. |
+| 0.2 | Extract config loading from `kowalski_loop.py` → `llmstack/config.py` (`load_config()`, validation, defaults, env derivation) | ✅ Done | `llmstack/config.py` is now the single config loader with normalization and env derivation. |
 | 0.3 | Extract server lifecycle (`start_server`, `wait_for_health`, `kill_server`, `restart_server`, `_ping`) → `llmstack/services/dflash_service.py` + generic `manager.py` | ✅ Done | DFlash lifecycle is encapsulated in `DFlashService` implementing `ServiceManager`. |
-| 0.4 | Extract Headroom boot (from `ralph_launcher.bash` + `start_headroom.bash`) → `llmstack/services/headroom_service.py` | ✅ Done | Headroom lifecycle is centralized in `HeadroomService` (including env isolation and health loop). |
+| 0.4 | Extract Headroom boot (from `kowalski_launcher.bash` + `start_headroom.bash`) → `llmstack/services/headroom_service.py` | ✅ Done | Headroom lifecycle is centralized in `HeadroomService` (including env isolation and health loop). |
 | 0.5 | Extract CCR config patching + trust pre-seeding (duplicated in 3 bash files) → `llmstack/services/ccr_service.py` | ✅ Done | `CCRService` exposes `patch_timeout(ms)` and `pretrust(path)`; CLI paths now call the service. |
 | 0.6 | Move gates (`_verify`, `_check_wiring`, `_run_smoke`, `_review`, `_changed_files`) → `llmstack/core/gates.py` | ✅ Done | Gate logic moved to `llmstack/core/gates.py` and used by executors/supervisor. |
 | 0.7 | Move executors (`run_direct_task`, `execute_task`, `_evaluate`, `_choose_executor`) → `llmstack/core/executors.py` | ✅ Done | Executor split is complete; behavior remains aligned to current runtime. |
 | 0.8 | Move git logic → `llmstack/core/git_ckpt.py` | ✅ Done | Checkpoint/restore/WIP logic is centralized in `GitManager`. |
 | 0.9 | Reassemble `Supervisor` in `llmstack/core/supervisor.py` wiring the above | ✅ Done | `Supervisor` orchestrates plan loop using services, executors, gates, and git checkpointing. |
 | 0.10 | Create `llmstack/cli.py` with subcommands: `serve`, `proxy`, `interactive`, `run`, `dashboard`, `doctor` | ✅ Done | Subcommands exist and drive the modular stack. |
-| 0.11 | Convert bash launchers into 5-line shims calling the CLI | ✅ Done (implemented differently) | Entry points are now in `bin/` (`launch_ralph.bash`, `launch_ccr.bash`, `launch_dashboard.bash`, `start_*`), not root-level `ralph_launcher.bash`. |
+| 0.11 | Convert bash launchers into 5-line shims calling the CLI | ✅ Done (implemented differently) | Entry points are now in `bin/` (`launch_kowalski.bash`, `launch_ccr.bash`, `launch_dashboard.bash`, `start_*`), not root-level `kowalski_launcher.bash`. |
 | 0.12 | Add `compileall` + a smoke test that loads config and dry-runs gate selection | ✅ Done (implemented differently) | Validation is covered by runtime gates + `llmstack doctor` health checks rather than a dedicated in-repo `compileall` + dry-run-gates script. |
 
 **Migration outcome:** refactor was delivered alongside runtime parity. Launching has been flipped to CLI wrappers in `bin/`, and legacy scripts are retained under `old/` and `llmstack/tools/` for backwards compatibility/history.
 
 **Example shim after refactor:**
 ```bash
-# ralph_launcher.bash (after Phase 0)
+# kowalski_launcher.bash (after Phase 0)
 #!/bin/bash
 set -e
 cd "$(dirname "$0")"
@@ -334,7 +334,7 @@ Current implementation status after this update:
 > **`pip` package for the MoE:** `turboquant-mlx-full` (`pip install -U "turboquant-mlx-full>=0.4.1"`), served via `turboquant-serve`. The MoE has **no draft model** (`draft: null`) — speculative decoding is a dense-model technique.
 
 > **Recommended default policy (workload-aware):**
-> - **Agentic / autonomous (Ralph) →** `turboquant-qwen35b-moe` (prefill-bound workload; the MoE's TTFT advantage dominates).
+> - **Agentic / autonomous (Kowalski) →** `turboquant-qwen35b-moe` (prefill-bound workload; the MoE's TTFT advantage dominates).
 > - **Decode-heavy / max quality →** `dflash-qwen27b` (4-bit dense is lossless under DFlash and prefills faster *per bit* than 3-bit, but is far slower at long context).
 > - **≤ ~24 GB RAM →** MoE is the only viable path.
 
@@ -652,7 +652,7 @@ These are the manual gotchas that took trial-and-error and MUST be scripted:
 ### 9.1 `install/install.sh` — master setup
 | Step | Action | Exact command / note |
 |------|--------|----------------------|
-| 1 | Choose profile (workload + hardware) | Ask intended use; `sysctl -n hw.memsize` ÷ 1024³. **Agentic OR ≤ ~24 GB → TurboQuant MoE (default)**; **decode-heavy/max-quality AND > 32 GB → DFlash dense**. MoE is the recommended default for Ralph even on 64 GB (prefill-bound). |
+| 1 | Choose profile (workload + hardware) | Ask intended use; `sysctl -n hw.memsize` ÷ 1024³. **Agentic OR ≤ ~24 GB → TurboQuant MoE (default)**; **decode-heavy/max-quality AND > 32 GB → DFlash dense**. MoE is the recommended default for Kowalski even on 64 GB (prefill-bound). |
 | 2 | Install Homebrew if missing | `/bin/bash -c "$(curl -fsSL .../install.sh)"` then run its `eval` PATH lines |
 | 3 | Install runtimes | `brew install python@3.14 python@3.13 node@20` (BOTH Pythons: 3.14 for project, 3.13 for Headroom) |
 | 4 | Fix Node icu4c crash | `brew reinstall node@20 && brew link --overwrite node@20`; verify `node --version` has no dyld error |
@@ -667,10 +667,10 @@ These are the manual gotchas that took trial-and-error and MUST be scripted:
 | 13 | Pre-download model(s) | Dense → `hf download z-lab/Qwen3.6-27B-DFlash && hf download mlx-community/Qwen3.6-27B-4bit` (avoids dflash 300 s draft-download timeout). MoE → `hf download manjunathshiva/Qwen3.6-35B-A3B-tq3-g32` (no draft). |
 | 14 | Headroom isolated venv | `python3.13 -m venv ~/headroom-env && ~/headroom-env/bin/pip install -U pip headroom-ai`; verify `~/headroom-env/bin/headroom --version` |
 | 15 | Generate CCR config | Write **multi-model** `~/.claude-code-router/config.json` from `ccr_service.render()` — one provider per backend family, provider `models` lists all configured targets, and `Router.*` points to current `active_model`; **`api_base_url` → `http://127.0.0.1:8789/v1/chat/completions` (Headroom)**, `timeout`/`API_TIMEOUT_MS` = `timeout_seconds × 1000`, `NON_INTERACTIVE_MODE: true`, transformer `maxtoken=8192`+`enhancetool`, `context_window: 32000`, `system_prompt_caching: true` |
-| 16 | Generate `llmstack_config.json` | From `ralph_config.template.json`; prompt for `dev_root` (or run `llmstack init`) |
+| 16 | Generate `llmstack_config.json` | From `kowalski_config.template.json`; prompt for `dev_root` (or run `llmstack init`) |
 | 17 | Pre-seed folder trust | Write `hasTrustDialogAccepted`/`hasCompletedProjectOnboarding` for `dev_root` into `~/.claude.json` |
 | 18 | Smoke test | `llmstack doctor` then: start the **active model's server** (`dflash serve` or `turboquant-serve`) → wait health on `:8787/v1/models` → start Headroom → assert it logged upstream `127.0.0.1:8787` and answers `:8789/health` → `ccr restart` → one `ccr code -p "say OK" --max-turns 1` round-trip → shut all down |
-| 19 | Print next steps | Interactive (`ccr_interactive.bash`) vs Autonomous (`ralph_launcher.bash`) |
+| 19 | Print next steps | Interactive (`ccr_interactive.bash`) vs Autonomous (`kowalski_launcher.bash`) |
 
 **Headroom launch contract the installer/service must honor (verbatim from the working launchers):**
 ```bash
@@ -732,7 +732,7 @@ Update `dflash-mlx`/`turboquant-mlx-full` (project venv), **`headroom-ai`** (its
 ---
 
 ## 12 · Immediate Quick Wins (safe to do now, pre-refactor)
-1. Create `ralph_config.template.json` with no hardcoded `dev_root`.
+1. Create `kowalski_config.template.json` with no hardcoded `dev_root`.
 2. Lift model constants (`MODEL`, dflash flags) into `llmstack_config.json` and read them — a stepping stone to the registry.
 3. Add error-feedback to retries: capture verify `stderr`, inject into the retry prompt.
 4. Native macOS notifications on plan complete/fail via `osascript -e 'display notification ...'`.

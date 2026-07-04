@@ -8,6 +8,7 @@ from llmstack.config import load_config
 from llmstack.core.supervisor import Supervisor
 from llmstack.models.registry import active_model_name, load_active_backend, load_model_registry
 from llmstack.services.ccr_service import CCRService
+from llmstack.services.inference_probe import served_model_id
 from llmstack.services.stack import ServiceStack
 
 CONFIG_PATH = "llmstack_config.json"
@@ -37,7 +38,7 @@ INIT_PROJECT_TEMPLATES = {
 
 
 def _parse_init_options(extra):
-    parser = argparse.ArgumentParser(prog="llmstack init", add_help=False)
+    parser = argparse.ArgumentParser(prog="llmstack init")
     parser.add_argument("--dev-root")
     parser.add_argument("--project-type")
     parser.add_argument("--goal")
@@ -256,7 +257,7 @@ def _restart_inference_server_if_running(config):
     stopped and the active backend is started in its place.
     """
     stack = ServiceStack(config)
-    served = stack.dflash.served_model_id()
+    served = served_model_id(expected_target=stack.backend.model_target())
     expected = stack.backend.model_target()
     if served is None:
         print("ℹ️  [llmstack] No inference server on :8787; skipping server restart "
@@ -410,13 +411,14 @@ def _recommend_model(registry, use_case, ram_gb):
 
 
 def run_model(config, args):
-    registry = load_model_registry(config)
-    active = active_model_name(config, registry)
     extra = args.extra or []
 
     if not extra or extra[0] in ("help", "-h", "--help"):
         print("Usage: llmstack model list | llmstack model use <name> | llmstack model recommend --use agentic|decode [--apply]")
         return 0
+
+    registry = load_model_registry(config)
+    active = active_model_name(config, registry)
 
     sub = extra[0]
     if sub == "list":
@@ -555,6 +557,9 @@ def main(argv=None):
 
     if args.command == "init":
         return run_init(args)
+
+    if args.command == "model" and (not args.extra or args.extra[0] in ("help", "-h", "--help")):
+        return run_model({}, args)
 
     config = load_config()
 

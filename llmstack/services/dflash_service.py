@@ -3,9 +3,9 @@ import os
 import signal
 import subprocess
 import time
-import urllib.request
 
 from .manager import ServiceManager
+from .inference_probe import served_model_id
 
 
 class DFlashService(ServiceManager):
@@ -26,19 +26,11 @@ class DFlashService(ServiceManager):
 
     def served_model_id(self, timeout=3):
         """Return the model id currently served on :8787 via /v1/models, or None."""
-        try:
-            with urllib.request.urlopen(self.health_url, timeout=timeout) as resp:
-                if resp.getcode() != 200:
-                    return None
-                payload = json.loads(resp.read().decode("utf-8"))
-        except Exception:
-            return None
-        data = payload.get("data") if isinstance(payload, dict) else None
-        if isinstance(data, list) and data:
-            first = data[0]
-            if isinstance(first, dict):
-                return first.get("id")
-        return None
+        return served_model_id(
+            health_url=self.health_url,
+            timeout=timeout,
+            expected_target=self.backend.model_target(),
+        )
 
     def _free_port(self, port=8787):
         """Kill any process holding the inference port so a different backend can bind it."""
@@ -69,34 +61,34 @@ class DFlashService(ServiceManager):
         served = self.served_model_id()
         if served is not None:
             if served == expected:
-                print(f"✅ [Ralph] Inference server already serving '{served}' on :8787; reusing.")
+                print(f"✅ [Kowalski] Inference server already serving '{served}' on :8787; reusing.")
                 return
-            print(f"♻️  [Ralph] Port 8787 serves '{served}' but active model is '{expected}'; replacing...")
+            print(f"♻️  [Kowalski] Port 8787 serves '{served}' but active model is '{expected}'; replacing...")
             self._free_port()
-        print(f"🚀 [Ralph] Starting inference server for model '{self.backend.model_name}'...")
+        print(f"🚀 [Kowalski] Starting inference server for model '{self.backend.model_name}'...")
         with open(self.log_file, "a") as log:
             self.server_process = subprocess.Popen(
                 self.cmd, stdout=log, stderr=subprocess.STDOUT, preexec_fn=os.setsid)
         self.wait_for_health()
 
     def wait_for_health(self, boot_timeout=600):
-        print("⏳ [Ralph] Waiting for model to load into RAM...")
+        print("⏳ [Kowalski] Waiting for model to load into RAM...")
         start = time.time()
         while not self._stop:
             if self._ping():
-                print("✅ [Ralph] Server online and healthy.")
+                print("✅ [Kowalski] Server online and healthy.")
                 return True
             if self.server_process and self.server_process.poll() is not None:
-                print("❌ [Ralph] Server died during boot. Restarting...")
+                print("❌ [Kowalski] Server died during boot. Restarting...")
                 self.server_process = None
                 return self.start()
             if time.time() - start > boot_timeout:
-                print("❌ [Ralph] Server boot timed out.")
+                print("❌ [Kowalski] Server boot timed out.")
                 return False
             time.sleep(5)
 
     def restart(self):
-        print("♻️  [Ralph] Hard-restarting DFlash...")
+        print("♻️  [Kowalski] Hard-restarting DFlash...")
         self.stop()
         time.sleep(3)
         self.start()

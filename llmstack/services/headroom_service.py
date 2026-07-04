@@ -55,7 +55,7 @@ class HeadroomService(ServiceManager):
     def ensure_running(self):
         if self.server_process and self.server_process.poll() is None:
             return
-        print("🗜️  [Ralph] Starting Headroom proxy...")
+        print("🗜️  [Kowalski] Starting Headroom proxy...")
         self._kill_existing_proxy()
         with open(self.log_file, "a") as log:
             self.server_process = subprocess.Popen(
@@ -69,24 +69,24 @@ class HeadroomService(ServiceManager):
         self.wait_for_health()
 
     def wait_for_health(self, boot_timeout=60):
-        print("⏳ [Ralph] Waiting for Headroom proxy to become healthy...")
+        print("⏳ [Kowalski] Waiting for Headroom proxy to become healthy...")
         start = time.time()
         while not self._stop:
             if self._ping():
-                print("✅ [Ralph] Headroom proxy online and healthy.")
+                print("✅ [Kowalski] Headroom proxy online and healthy.")
                 return True
             if self.server_process and self.server_process.poll() is not None:
-                print("❌ [Ralph] Headroom proxy exited during startup.")
+                print("❌ [Kowalski] Headroom proxy exited during startup.")
                 self.server_process = None
                 return False
             if time.time() - start > boot_timeout:
-                print("❌ [Ralph] Headroom proxy startup timed out.")
+                print("❌ [Kowalski] Headroom proxy startup timed out.")
                 return False
             time.sleep(2)
         return False
 
     def restart(self):
-        print("♻️  [Ralph] Restarting Headroom proxy...")
+        print("♻️  [Kowalski] Restarting Headroom proxy...")
         self.stop()
         time.sleep(1)
         self.ensure_running()

@@ -7,6 +7,8 @@ Run with the project venv from the repo root:
 Exits non-zero if any check fails. No third-party test runner required.
 """
 import builtins
+import contextlib
+import io
 import json
 import os
 import sys
@@ -14,7 +16,7 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from llmstack.cli import run_init
+from llmstack.cli import main, run_init
 
 
 class Args:
@@ -183,6 +185,17 @@ def test_init_force_flag_via_extra_overwrites():
             os.chdir(old_cwd)
 
 
+def test_model_help_does_not_load_workspace_config():
+    print("[cli] model --help does not load workspace config")
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = main(["model", "--help"])
+    out = buf.getvalue()
+    check(rc == 0, "model --help returned success")
+    check("Usage: llmstack model list" in out, "model help usage printed")
+    check("Config loaded" not in out, "model help did not load workspace config")
+
+
 if __name__ == "__main__":
     tests = [
         test_init_writes_config_and_bootstrap_plan,
@@ -190,6 +203,7 @@ if __name__ == "__main__":
         test_init_force_overwrites_existing_config,
         test_init_non_interactive_uses_explicit_template,
         test_init_force_flag_via_extra_overwrites,
+        test_model_help_does_not_load_workspace_config,
     ]
     failed = 0
     for test_func in tests:

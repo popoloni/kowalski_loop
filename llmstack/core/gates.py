@@ -19,10 +19,10 @@ def check_wiring(dev_root):
     orphans = [f for f in js_files if f not in refs]
     missing = [r for r in refs if r.endswith(".js") and not os.path.exists(os.path.join(dev_root, r))]
     if orphans:
-        print(f"❌ [Ralph] Orphan JS not loaded by index.html: {orphans}")
+        print(f"❌ [Kowalski] Orphan JS not loaded by index.html: {orphans}")
         return False
     if missing:
-        print(f"❌ [Ralph] index.html references missing files: {missing}")
+        print(f"❌ [Kowalski] index.html references missing files: {missing}")
         return False
     return True
 
@@ -33,17 +33,17 @@ def run_smoke(dev_root, task):
         code = "\n".join(code)
     if not code:
         return True
-    print("🧪 [Ralph] Running behavioral smoke test...")
+    print("🧪 [Kowalski] Running behavioral smoke test...")
     try:
         r = subprocess.run(["node", "-e", code], cwd=dev_root,
                            capture_output=True, text=True, timeout=120)
     except subprocess.TimeoutExpired:
-        print("❌ [Ralph] Smoke test TIMED OUT.")
+        print("❌ [Kowalski] Smoke test TIMED OUT.")
         return False
     if r.returncode != 0:
-        print(f"❌ [Ralph] Smoke FAILED:\n{r.stdout}\n{r.stderr}")
+        print(f"❌ [Kowalski] Smoke FAILED:\n{r.stdout}\n{r.stderr}")
         return False
-    print(f"✅ [Ralph] Smoke: {r.stdout.strip()[:200]}")
+    print(f"✅ [Kowalski] Smoke: {r.stdout.strip()[:200]}")
     return True
 
 
@@ -61,7 +61,7 @@ def syntax_ok(dev_root, task):
 
 
 def review(task, dev_root):
-    print("🧑‍⚖️ [Ralph] Review is not enabled in Phase 0; passing by default.")
+    print("🧑‍⚖️ [Kowalski] Review is not enabled in Phase 0; passing by default.")
     return True
 
 
@@ -173,10 +173,10 @@ def _run_gate_spec(spec, task, dev_root, git_manager):
 
     if kind == "verify":
         command = spec["command"]
-        print(f"🔎 [Ralph] Verifying: {command}")
+        print(f"🔎 [Kowalski] Verifying: {command}")
         result = subprocess.run(command, shell=True, cwd=dev_root, capture_output=True, text=True)
         if result.returncode != 0:
-            print(f"❌ [Ralph] Syntax/verify FAILED:\n{result.stdout}\n{result.stderr}")
+            print(f"❌ [Kowalski] Syntax/verify FAILED:\n{result.stdout}\n{result.stderr}")
             feedback = (result.stderr or result.stdout or "").strip()
             return False, "verify_failed", feedback, True
         return True, "ok", "", True
@@ -189,21 +189,21 @@ def _run_gate_spec(spec, task, dev_root, git_manager):
                    if os.path.exists(path) else "")
         missing = [marker for marker in expect if marker.lower() not in content]
         if missing:
-            print(f"❌ [Ralph] Feature markers MISSING in {target}: {missing}")
+            print(f"❌ [Kowalski] Feature markers MISSING in {target}: {missing}")
             return False, "expect_failed", f"Missing feature markers in {target}: {missing}", True
-        print(f"✅ [Ralph] Feature markers present: {expect}")
+        print(f"✅ [Kowalski] Feature markers present: {expect}")
         return True, "ok", "", True
 
     if kind == "require_change":
         changed = changed_files(git_manager)
         if not changed:
-            print("❌ [Ralph] No file changes detected — task was a no-op.")
+            print("❌ [Kowalski] No file changes detected — task was a no-op.")
             return False, "no_change", "No file changes detected during verification.", True
         target = spec.get("target")
         if target and target not in changed:
-            print(f"❌ [Ralph] Declared file '{target}' was NOT modified. Changed: {sorted(changed)}")
+            print(f"❌ [Kowalski] Declared file '{target}' was NOT modified. Changed: {sorted(changed)}")
             return False, "target_not_changed", f"Declared file '{target}' was not modified. Changed: {sorted(changed)}", True
-        print(f"📈 [Ralph] Changed files: {sorted(changed)}")
+        print(f"📈 [Kowalski] Changed files: {sorted(changed)}")
         return True, "ok", "", True
 
     if kind == "wiring":
@@ -223,16 +223,16 @@ def _run_gate_spec(spec, task, dev_root, git_manager):
             plan_file=task.get("_plan_file", ""),
         )
         plugin_name = spec["plugin_name"]
-        print(f"🧩 [Ralph] Plugin '{plugin_name}': {command}")
+        print(f"🧩 [Kowalski] Plugin '{plugin_name}': {command}")
         result = subprocess.run(command, shell=True, cwd=dev_root, capture_output=True, text=True)
         if result.returncode == 0:
-            print(f"✅ [Ralph] Plugin '{plugin_name}' passed.")
+            print(f"✅ [Kowalski] Plugin '{plugin_name}' passed.")
             return True, "ok", "", True
         feedback = _plugin_feedback(plugin_name, result)
         if spec.get("on_failure", "fail") == "warn":
-            print(f"⚠️  [Ralph] {feedback}")
+            print(f"⚠️  [Kowalski] {feedback}")
             return True, "ok", "", True
-        print(f"❌ [Ralph] {feedback}")
+        print(f"❌ [Kowalski] {feedback}")
         return False, "plugin_failed", feedback, True
 
     if kind == "review":
@@ -274,7 +274,7 @@ def verify_detailed(task, dev_root, git_manager, config, require_change_override
         return False, reason, feedback
 
     if not ran_any:
-        print("⚠️  [Ralph] No verify/expect/smoke for this task — weak gate.")
+        print("⚠️  [Kowalski] No verify/expect/smoke for this task — weak gate.")
     return True, "ok", ""
 
 

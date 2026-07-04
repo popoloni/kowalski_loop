@@ -28,7 +28,7 @@ class ContinuousMode(PlanMode):
             plan = fallback_plan if isinstance(fallback_plan, dict) else {"tasks": []}
             self._queue_mtime = None
         except json.JSONDecodeError:
-            print(f"⚠️  [Ralph] Continuous queue '{self.queue_file}' is invalid JSON — waiting for a valid queue.")
+            print(f"⚠️  [Kowalski] Continuous queue '{self.queue_file}' is invalid JSON — waiting for a valid queue.")
             plan = fallback_plan if isinstance(fallback_plan, dict) else {"tasks": []}
         return plan
 
@@ -60,5 +60,5 @@ class ContinuousMode(PlanMode):
             task = self._next_available_task()
             if task is not None:
                 return task
-            print(f"⏳ [Ralph] Continuous queue empty — waiting {self.poll_seconds:.1f}s for new tasks...")
+            print(f"⏳ [Kowalski] Continuous queue empty — waiting {self.poll_seconds:.1f}s for new tasks...")
             time.sleep(self.poll_seconds)

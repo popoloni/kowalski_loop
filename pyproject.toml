@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "llmstack"
+version = "0.1.0"
+description = "Local LLM workspace orchestration tools"
+readme = "README.md"
+requires-python = ">=3.11"
+
+[project.scripts]
+llmstack = "llmstack.cli:main"
+
+[tool.setuptools]
+include-package-data = false
+
+[tool.setuptools.packages.find]
+include = ["llmstack*"]

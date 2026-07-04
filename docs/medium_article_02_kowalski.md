@@ -7,7 +7,7 @@ That setup is great for *interactive* work — you in the driver's seat, reading
 We'll add two pieces on top of the Part 1 stack:
 
 1. **Headroom** — a code-aware compression proxy that shrinks the prompt before it ever reaches the model.
-2. **Ralph** — a Python supervisor that boots the whole stack, decomposes a goal into atomic tasks, runs each one, and puts every change through six verification gates before it's allowed near a git commit.
+2. **Kowalski** — a Python supervisor that boots the whole stack, decomposes a goal into atomic tasks, runs each one, and puts every change through six verification gates before it's allowed near a git commit.
 
 By the end, you'll be able to write a build plan, run one command, and walk away. And to prove it isn't theory, the last chapter dissects a real multi-day run where this system built a playable Pac-Man clone — including every place it face-planted and what fixed it.
 
@@ -29,13 +29,13 @@ In interactive mode *you* are the verification layer — you catch the orphan fi
 
 ## The architecture, after this guide
 
-Part 1's chain gains one box (Headroom) and one brain (Ralph):
+Part 1's chain gains one box (Headroom) and one brain (Kowalski):
 
 ```
 Claude Code  →  ccr (router)  →  Headroom proxy :8789  →  DFlash server :8787  →  MLX / Apple GPU
                                   └── compresses the prompt        └── runs the model
         ▲
-   Ralph supervisor (boots all of the above, warms the cache, runs the plan)
+   Kowalski supervisor (boots all of the above, warms the cache, runs the plan)
 ```
 
 | Component | Job |
@@ -43,9 +43,9 @@ Claude Code  →  ccr (router)  →  Headroom proxy :8789  →  DFlash server :8
 | **DFlash server** | The OpenAI-compatible endpoint from Part 1, running the 4-bit Qwen3.6-27B + 2B draft. |
 | **Headroom proxy** | New. Sits in front of DFlash and compresses the context before forwarding. |
 | **ccr** | The Part 1 bridge — now pointed at Headroom (`:8789`) instead of DFlash directly. |
-| **Ralph** | New. Lifecycle, planning, execution, verification, checkpoints, resume. |
+| **Kowalski** | New. Lifecycle, planning, execution, verification, checkpoints, resume. |
 
-A key detail that matters for the case study later: Ralph's **direct** executor talks to DFlash *directly* on `:8787` (no router, no Headroom), while the **agentic** executor goes the full Claude Code → ccr → Headroom → DFlash route. Two paths, two cost profiles.
+A key detail that matters for the case study later: Kowalski's **direct** executor talks to DFlash *directly* on `:8787` (no router, no Headroom), while the **agentic** executor goes the full Claude Code → ccr → Headroom → DFlash route. Two paths, two cost profiles.
 
 ---
 
@@ -116,9 +116,9 @@ That's the entire compression layer. Stacked on top of DFlash's prefix cache and
 
 ---
 
-## Phase 2: Meet Ralph, the supervisor that doesn't trust the model
+## Phase 2: Meet Kowalski, the supervisor that doesn't trust the model
 
-Ralph's design philosophy is one sentence:
+Kowalski's design philosophy is one sentence:
 
 > **Assume the model will fail every task, and make failure cheap and reversible.**
 
@@ -126,7 +126,7 @@ Here's how it earns that — and how to set it up.
 
 ### Step 1 — Write a config
 
-Ralph reads a single `llmstack_config.json` at the workspace root. It's the one source of truth for timeouts, permissions, and which project to build:
+Kowalski reads a single `llmstack_config.json` at the workspace root. It's the one source of truth for timeouts, permissions, and which project to build:
 
 ```json
 {
@@ -141,11 +141,11 @@ Ralph reads a single `llmstack_config.json` at the workspace root. It's the one 
 }
 ```
 
-One important detail learned the hard way: **every timeout must come from one knob.** Claude Code, the router, and the model each have their own idea of "too slow," and if they disagree you get phantom failures where one layer kills a request another was happily processing. Ralph derives all of them from `timeout_seconds` and pushes the value into the environment and the router config on boot.
+One important detail learned the hard way: **every timeout must come from one knob.** Claude Code, the router, and the model each have their own idea of "too slow," and if they disagree you get phantom failures where one layer kills a request another was happily processing. Kowalski derives all of them from `timeout_seconds` and pushes the value into the environment and the router config on boot.
 
 ### Step 2 — Generate a plan (don't hand it a vague goal)
 
-You don't give Ralph "build a Pac-Man clone" and hope. `build-plan.py` asks the local model to decompose the goal into a JSON array of **atomic, ordered, verifiable tasks** — each touching a single file, with explicit dependencies and a shell command that proves it worked:
+You don't give Kowalski "build a Pac-Man clone" and hope. `build-plan.py` asks the local model to decompose the goal into a JSON array of **atomic, ordered, verifiable tasks** — each touching a single file, with explicit dependencies and a shell command that proves it worked:
 
 ```bash
 source env/bin/activate
@@ -164,12 +164,12 @@ The generator is also smart about *which* tasks become agentic: anything whose p
 
 ### Step 3 — Understand the two execution modes
 
-The trick that made the whole thing stable is that Ralph picks an executor **per task**:
+The trick that made the whole thing stable is that Kowalski picks an executor **per task**:
 
-- **Direct mode** — for self-contained file creation, Ralph bypasses the agent loop and sends *one* request straight to DFlash: "write this file." No 33k-token agent context, no tool-call dance, no OOM. If the model hits the token cap mid-file, Ralph asks it to *continue from exactly where it stopped* and stitches the pieces together.
+- **Direct mode** — for self-contained file creation, Kowalski bypasses the agent loop and sends *one* request straight to DFlash: "write this file." No 33k-token agent context, no tool-call dance, no OOM. If the model hits the token cap mid-file, Kowalski asks it to *continue from exactly where it stopped* and stitches the pieces together.
 - **Agentic mode** — for tasks that genuinely need to read across files and make targeted edits, it falls back to `ccr code` with a strict system prompt and a tight tool allowlist.
 
-Most file-creation tasks run *direct*, and that single decision eliminated the majority of crashes and timeouts. You use the expensive agent loop only when you actually need it. Ralph even chooses automatically: a *create* task is direct, but a *modify* of a file that has grown past `size_threshold_bytes` (12 KB) is auto-promoted to the agent's targeted-`Edit` path, because regenerating a big file from scratch invites truncation. You can also force the decision per task with `"strategy": "edit"` or `"strategy": "rewrite"`.
+Most file-creation tasks run *direct*, and that single decision eliminated the majority of crashes and timeouts. You use the expensive agent loop only when you actually need it. Kowalski even chooses automatically: a *create* task is direct, but a *modify* of a file that has grown past `size_threshold_bytes` (12 KB) is auto-promoted to the agent's targeted-`Edit` path, because regenerating a big file from scratch invites truncation. You can also force the decision per task with `"strategy": "edit"` or `"strategy": "rewrite"`.
 
 ### Step 4 — Know the six gates a task must survive
 
@@ -188,11 +188,11 @@ Only a change that clears all applicable gates reaches a commit. Everything else
 
 Every verified task becomes a git commit. Three behaviors make interruptions cheap:
 
-- **Restore-before-retry.** Before each attempt Ralph runs `git reset --hard HEAD` + `git clean -fd`, so a botched attempt can never feed a corrupt file into the next one as context. A `.gitignore` protects `.claude/`, `node_modules/`, and logs, so the plan's own state is never rolled back — a footgun I hit before adding it (a `reset --hard` once reverted the plan's completed-status because the plan lived under `.claude/`).
-- **WIP resume.** If the model times out but left **valid, parseable** progress, Ralph makes a `WIP (resumable)` commit and re-runs the task with a prompt that says *"this file already contains partial work — continue it, don't restart."* Progress-preserving resumes have their own budget (`max_resumes = 8`) separate from hard-failure retries (`max_retries = 3`), so making slow progress never burns your retry allowance.
-- **Server-crash watchdog.** A health-check thread pings DFlash during every task; if the server dies mid-task, Ralph restarts it and doesn't count it against any budget.
+- **Restore-before-retry.** Before each attempt Kowalski runs `git reset --hard HEAD` + `git clean -fd`, so a botched attempt can never feed a corrupt file into the next one as context. A `.gitignore` protects `.claude/`, `node_modules/`, and logs, so the plan's own state is never rolled back — a footgun I hit before adding it (a `reset --hard` once reverted the plan's completed-status because the plan lived under `.claude/`).
+- **WIP resume.** If the model times out but left **valid, parseable** progress, Kowalski makes a `WIP (resumable)` commit and re-runs the task with a prompt that says *"this file already contains partial work — continue it, don't restart."* Progress-preserving resumes have their own budget (`max_resumes = 8`) separate from hard-failure retries (`max_retries = 3`), so making slow progress never burns your retry allowance.
+- **Server-crash watchdog.** A health-check thread pings DFlash during every task; if the server dies mid-task, Kowalski restarts it and doesn't count it against any budget.
 
-The payoff: you can `Ctrl-C` Ralph and re-launch it, and it picks up from the last verified commit. A timeout costs you minutes, not your session.
+The payoff: you can `Ctrl-C` Kowalski and re-launch it, and it picks up from the last verified commit. A timeout costs you minutes, not your session.
 
 ---
 
@@ -201,7 +201,7 @@ The payoff: you can `Ctrl-C` Ralph and re-launch it, and it picks up from the la
 With Headroom up (Phase 1) and a plan generated (Phase 2), launch the whole thing with one command:
 
 ```bash
-bash ralph_launcher.bash
+bash kowalski_launcher.bash
 ```
 
 The launcher will:
@@ -210,7 +210,7 @@ The launcher will:
 2. Centralize the timeout into the environment and the router config.
 3. **Pre-seed folder trust** in `~/.claude.json` so the unattended run doesn't block on the trust dialog.
 4. Start (or confirm) Headroom with the hard pre-flight check, then restart the router.
-5. Hand control to `ralph_loop.py`, which boots DFlash, warms the prefix cache (only if an agentic task remains), and grinds through the plan — committing only verified work.
+5. Hand control to `kowalski_loop.py`, which boots DFlash, warms the prefix cache (only if an agentic task remains), and grinds through the plan — committing only verified work.
 
 Then walk away. When you come back, `git log` shows you exactly which tasks passed.
 
@@ -235,7 +235,7 @@ Every completed call is also appended to `dflash_timings.csv` for later analysis
 
 ---
 
-## The hard-won fixes (why Ralph looks the way it does)
+## The hard-won fixes (why Kowalski looks the way it does)
 
 Every defensive feature above is a scar. The most instructive ones, in the order I hit them:
 
@@ -251,7 +251,7 @@ Every defensive feature above is a scar. The most instructive ones, in the order
 
 ## Case Study: building Pac-Man — the good, the bad, and the 18-minute stall
 
-Theory is cheap. Here's what actually happened when I pointed this system at a 23-task plan to build a playable Pac-Man clone over several days (June 20–25). The plan (`pacman_plan.json`), the debug log (`ralph_debug.log`), and the per-call metrics (`dflash_timings.csv`) together tell the whole story.
+Theory is cheap. Here's what actually happened when I pointed this system at a 23-task plan to build a playable Pac-Man clone over several days (June 20–25). The plan (`pacman_plan.json`), the debug log (`kowalski_debug.log`), and the per-call metrics (`dflash_timings.csv`) together tell the whole story.
 
 ### The plan
 
@@ -306,7 +306,7 @@ There's a slow-motion failure visible across the run. Because direct mode regene
 
 *One continuous run (115 calls). The prompt climbs from ~22k to ~86k tokens as files are regenerated whole (the dip near call 27 is a fresh-context restart). MLX peak memory tracks it upward — 17 → 54 GB — pressing toward the ~52 GB Metal wired limit that caused the original OOM. Bigger files mean bigger prompts mean bigger, more expensive cache misses (those 900s+ stalls all live in the right third of this run).*
 
-This is precisely why the `size_threshold_bytes` auto-switch exists: once a file crosses 12 KB, Ralph stops regenerating it wholesale and routes the task to the agent's targeted `Edit` path instead — which keeps both the context and the memory ceiling in check.
+This is precisely why the `size_threshold_bytes` auto-switch exists: once a file crosses 12 KB, Kowalski stops regenerating it wholesale and routes the task to the agent's targeted `Edit` path instead — which keeps both the context and the memory ceiling in check.
 
 ### The ugly: the task-14 and task-22 sagas
 
@@ -328,7 +328,7 @@ RESULT subtype=success is_error=True:
 API Error: Content block is not a text block
 ```
 
-— a translation-proxy formatting failure the agent could not escape, attempt after attempt, across two separate days. The rescue was switching that task to **direct mode**: a single clean generation (`finish=stop`) produced the file and passed `node --check`. The takeaway baked into Ralph: when the agent path keeps producing dirty finishes on a self-contained file, regenerating it directly is often the way out.
+— a translation-proxy formatting failure the agent could not escape, attempt after attempt, across two separate days. The rescue was switching that task to **direct mode**: a single clean generation (`finish=stop`) produced the file and passed `node --check`. The takeaway baked into Kowalski: when the agent path keeps producing dirty finishes on a self-contained file, regenerating it directly is often the way out.
 
 ### Memory: the slow climb
 
@@ -336,7 +336,7 @@ The memory curve in the chart above tells its own cautionary tale: peak `mlx_pea
 
 ### What Pac-Man actually proved
 
-By the end, all 23 tasks were committed and the game was playable — Pac-Man moves, ghosts chase and scatter and flee, dots score, lives count down, levels advance, sounds play, and there's a start/game-over screen. It is **not** flawless: the hand-added task 22 exists precisely because the ghosts misbehaved on first pass, and whole-file regeneration occasionally dropped a feature that a later task had to restore. But every line that landed had passed `node --check` and a git checkpoint, and not a single multi-minute stall or server crash cost me the session — Ralph resumed from the last good commit every time.
+By the end, all 23 tasks were committed and the game was playable — Pac-Man moves, ghosts chase and scatter and flee, dots score, lives count down, levels advance, sounds play, and there's a start/game-over screen. It is **not** flawless: the hand-added task 22 exists precisely because the ghosts misbehaved on first pass, and whole-file regeneration occasionally dropped a feature that a later task had to restore. But every line that landed had passed `node --check` and a git checkpoint, and not a single multi-minute stall or server crash cost me the session — Kowalski resumed from the last good commit every time.
 
 That's the whole thesis in one build: a local 27B *can* assemble a real, multi-file application unattended — if something sits between it and your repo that assumes it will fail, makes failure cheap, and refuses to commit anything it can't verify.
 
@@ -353,9 +353,9 @@ That's the whole thesis in one build: a local 27B *can* assemble a real, multi-f
 
 **What's rough:**
 - It's **hardcoded to one model** (the Part 1 DFlash setup) and **one project** (`pacman_clone`). Switching either means editing code.
-- **Launch and logic are tangled** — the bash launchers duplicate setup and `ralph_loop.py` does everything in one file.
+- **Launch and logic are tangled** — the bash launchers duplicate setup and `kowalski_loop.py` does everything in one file.
 - **Whole-file regeneration bloats context** over a long plan (the 22k → 85k climb above), which makes late-stage cache misses expensive.
-- **No remote visibility** — if Ralph is grinding overnight, you can't check on it from your phone.
+- **No remote visibility** — if Kowalski is grinding overnight, you can't check on it from your phone.
 - **The gates are JS-centric** — the wiring check assumes an `index.html` + `*.js` web app.
 
 It's a genuinely useful tool currently shaped like *one person's setup for one project on one machine.*
@@ -377,7 +377,7 @@ The roadmap writes itself from those caveats:
 
 ## Conclusion
 
-Part 1 proved a local 27B can be *fast*. This part is about the unglamorous thing that actually makes a local agent useful: **trust**. A fast model that quietly commits broken code is worse than no model at all. Ralph's six gates, dual execution modes, and checkpoint-and-resume discipline are what turn "Claude Code runs locally" into "Claude Code *builds* something locally, unattended, and I believe the result."
+Part 1 proved a local 27B can be *fast*. This part is about the unglamorous thing that actually makes a local agent useful: **trust**. A fast model that quietly commits broken code is worse than no model at all. Kowalski's six gates, dual execution modes, and checkpoint-and-resume discipline are what turn "Claude Code runs locally" into "Claude Code *builds* something locally, unattended, and I believe the result."
 
 The Pac-Man run is the honest version of that promise: not magic, not flawless, but a real game assembled by a model on a laptop, every committed line verified, every stall survived. It's not Cloud Claude, and it won't be. But it's a free, private, offline coding agent that can grind through a plan while you're not watching — and hand you back only the work that passed every test.
 

@@ -135,7 +135,7 @@ class CCRService(ServiceManager):
         }
 
         print(
-            "🔧 [Ralph] Rendered CCR multi-model config "
+            "🔧 [Kowalski] Rendered CCR multi-model config "
             f"(active={model_name} -> {route_target}, providers={len(providers)})"
         )
         return rendered
@@ -148,7 +148,7 @@ class CCRService(ServiceManager):
             backend=backend,
         )
         self._save_config(cfg)
-        print(f"✅ [Ralph] CCR config synced to {self.config_path}")
+        print(f"✅ [Kowalski] CCR config synced to {self.config_path}")
         return cfg
 
     def validate_multi_model_config(self, registry, active_model):
@@ -219,7 +219,7 @@ class CCRService(ServiceManager):
         for prov in cfg.get("Providers", []):
             prov["timeout"] = timeout_ms
         self._save_config(cfg)
-        print(f"🔧 [Ralph] CCR config timeout set to {timeout_ms} ms")
+        print(f"🔧 [Kowalski] CCR config timeout set to {timeout_ms} ms")
 
     def pretrust(self, dev_root):
         path = os.path.abspath(dev_root)
@@ -233,13 +233,13 @@ class CCRService(ServiceManager):
         proj["hasCompletedProjectOnboarding"] = True
         with open(claude_json, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
-        print(f"🔐 [Ralph] Pre-trusted folder: {path}")
+        print(f"🔐 [Kowalski] Pre-trusted folder: {path}")
 
     def ensure_running(self):
         self.restart()
 
     def restart(self):
-        print("🔄 [Ralph] Restarting Claude Code Router daemon...")
+        print("🔄 [Kowalski] Restarting Claude Code Router daemon...")
         subprocess.run(["ccr", "restart"], check=True)
 
     def stop(self):

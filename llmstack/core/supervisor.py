@@ -53,7 +53,7 @@ class Supervisor:
         plan = self.load_plan()
         mode = self._make_mode(plan)
         tasks = mode.tasks
-        print(f"📋 [Ralph] Loaded {len(tasks)} tasks.")
+        print(f"📋 [Kowalski] Loaded {len(tasks)} tasks.")
         self.ensure_git()
 
         pending = [t for t in tasks if t.get("status") != "completed"]
@@ -64,7 +64,7 @@ class Supervisor:
         while task is not None:
             executor_type = self.executor.choose_executor(task)
             if executor_type == "agent" and not self.executor.syntax_ok(task):
-                print("🧹 [Ralph] Corrupt leftover detected — restoring to last checkpoint.")
+                print("🧹 [Kowalski] Corrupt leftover detected — restoring to last checkpoint.")
                 self.git.restore_to_checkpoint(task)
 
             hard_fails = resumes = 0
@@ -78,7 +78,7 @@ class Supervisor:
 
                 n = hard_fails + resumes + 1
                 tag = executor_type + (", resume" if resumes else "")
-                print(f"▶️  [Ralph] Task {task.get('id')} — attempt {n} ({tag})")
+                print(f"▶️  [Kowalski] Task {task.get('id')} — attempt {n} ({tag})")
 
                 if executor_type == "direct":
                     outcome = self.executor.run_direct_task(task, attempt=n)
@@ -115,7 +115,7 @@ class Supervisor:
             self.services.stop()
             raise RuntimeError(plugins_feedback)
 
-        print("\n🎉 [Ralph] All tasks verified and committed!")
+        print("\n🎉 [Kowalski] All tasks verified and committed!")
         close = getattr(mode, "close", None)
         if callable(close):
             close()

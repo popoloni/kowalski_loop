@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Autonomously build a Ralph plan.json from a high-level goal.
+"""Autonomously build a Kowalski plan.json from a high-level goal.
 Requires dflash running on :8787.  Usage: python -m llmstack.tools.build_plan "your project goal"
 """
 import json, os, sys, urllib.request

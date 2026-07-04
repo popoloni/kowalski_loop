@@ -1,3 +1,10 @@
+Metadata-Version: 2.4
+Name: llmstack
+Version: 0.1.0
+Summary: Local LLM workspace orchestration tools
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+
 # local-llm-workspace
 
 A local stack for running a quantized LLM (Qwen3-27B, Qwen3-35B or Gemma4-12B) on Apple Silicon via **DFlash/TurboQuant/MLX** inference backend, with a compression proxy (**Headroom**), a Claude Code router (**ccr**), and an unattended supervisor (**Kowalski**) driving **Claude Code** agent.

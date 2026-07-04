@@ -24,10 +24,10 @@ class GitManager:
         self.git("add", ".gitignore")
         if self.git("rev-parse", "--verify", "-q", "HEAD").returncode != 0:
             self.git("add", "-A")
-            self.git("commit", "-q", "-m", "Ralph baseline")
+            self.git("commit", "-q", "-m", "Kowalski baseline")
         else:
-            self.git("commit", "-q", "-m", "Ralph: protect runtime state")
-        print("📦 [Ralph] Git ready (last verified state protected).")
+            self.git("commit", "-q", "-m", "Kowalski: protect runtime state")
+        print("📦 [Kowalski] Git ready (last verified state protected).")
 
     def changed_files(self):
         out = self.git("status", "--porcelain").stdout
@@ -47,12 +47,12 @@ class GitManager:
             p = os.path.join(self.dev_root, task["file"])
             if os.path.exists(p):
                 os.remove(p)
-                print(f"🗑️  [Ralph] No checkpoint yet — removed partial {task['file']}.")
+                print(f"🗑️  [Kowalski] No checkpoint yet — removed partial {task['file']}.")
 
     def git_checkpoint(self, task, label="verified"):
         self.git("add", "-A")
-        self.git("commit", "-q", "-m", f"Ralph: task {task.get('id')} {label}")
+        self.git("commit", "-q", "-m", f"Kowalski: task {task.get('id')} {label}")
 
     def wip_commit(self, task):
         self.git_checkpoint(task, label="WIP (resumable)")
-        print(f"💾 [Ralph] Progress on task {task.get('id')} saved (WIP commit).")
+        print(f"💾 [Kowalski] Progress on task {task.get('id')} saved (WIP commit).")

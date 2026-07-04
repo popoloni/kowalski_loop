@@ -55,7 +55,7 @@ DEFAULT_CONFIG = {
     "max_resumes": 8,
     "agent_format_retries": 2,
     "size_threshold_bytes": 12000,
-    "debug_log": "logs/ralph_debug.log",
+    "debug_log": "logs/kowalski_debug.log",
     "debug_max_chars": 0,
     "require_change": True,
     "wiring_check": True,
@@ -128,13 +128,13 @@ def normalize_permission_mode(raw_mode):
     if mode in LEGACY_PERMISSION_MODE_ALIASES:
         mapped = LEGACY_PERMISSION_MODE_ALIASES[mode]
         print(
-            f"⚠️ [Ralph] Legacy permission_mode '{mode}' mapped to '{mapped}'. "
+            f"⚠️ [Kowalski] Legacy permission_mode '{mode}' mapped to '{mapped}'. "
             "Please update llmstack_config.json."
         )
         return mapped
 
     print(
-        f"⚠️ [Ralph] Unsupported permission_mode '{mode}', "
+        f"⚠️ [Kowalski] Unsupported permission_mode '{mode}', "
         f"falling back to '{DEFAULT_CONFIG['permission_mode']}'."
     )
     return DEFAULT_CONFIG["permission_mode"]
@@ -161,9 +161,9 @@ def load_config(config_path="llmstack_config.json"):
     if os.path.exists(config_path):
         with open(config_path, encoding="utf-8") as f:
             cfg.update(json.load(f))
-        print(f"🔧 [Ralph] Config loaded: Root='{cfg['dev_root']}', Plan='{cfg['plan_file']}'")
+        print(f"🔧 [Kowalski] Config loaded: Root='{cfg['dev_root']}', Plan='{cfg['plan_file']}'")
     else:
-        print("⚠️ [Ralph] No llmstack_config.json found, using defaults.")
+        print("⚠️ [Kowalski] No llmstack_config.json found, using defaults.")
 
     cfg["log_dir"] = _abs_path(base_dir, cfg.get("log_dir", "logs"))
     os.makedirs(cfg["log_dir"], exist_ok=True)
@@ -173,7 +173,7 @@ def load_config(config_path="llmstack_config.json"):
     cfg["headroom_log"] = _abs_path(base_dir, cfg.get("headroom_log") or os.path.join(cfg["log_dir"], "headroom.log"))
     cfg["headroom_traffic_log"] = _abs_path(base_dir, cfg.get("headroom_traffic_log") or os.path.join(cfg["log_dir"], "headroom_traffic.jsonl"))
     cfg["timings_csv"] = _abs_path(base_dir, cfg.get("timings_csv") or os.path.join(cfg["log_dir"], "dflash_timings.csv"))
-    cfg["debug_log"] = _abs_path(base_dir, cfg.get("debug_log") or os.path.join(cfg["log_dir"], "ralph_debug.log"))
+    cfg["debug_log"] = _abs_path(base_dir, cfg.get("debug_log") or os.path.join(cfg["log_dir"], "kowalski_debug.log"))
 
     for key in ("dflash_log", "headroom_log", "headroom_traffic_log", "timings_csv", "debug_log"):
         os.makedirs(os.path.dirname(cfg[key]), exist_ok=True)
@@ -194,5 +194,5 @@ def load_config(config_path="llmstack_config.json"):
         "CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING": "1",
         "CLAUDE_CODE_DISABLE_THINKING": "1",
     })
-    print(f"⏱️  [Ralph] Timeout = {timeout_s}s (API_TIMEOUT_MS={os.environ['API_TIMEOUT_MS']}).")
+    print(f"⏱️  [Kowalski] Timeout = {timeout_s}s (API_TIMEOUT_MS={os.environ['API_TIMEOUT_MS']}).")
     return cfg

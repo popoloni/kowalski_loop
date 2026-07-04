@@ -70,10 +70,10 @@ class Executor:
         low = (text or "").lower()
         return "content block is not a text block" in low
 
-    def _extract_ralph_status(self, text):
+    def _extract_kowalski_status(self, text):
         if not text:
             return None
-        m = re.search(r"RalphStatus\s*:\s*(changed|already_done|blocked)", text, flags=re.IGNORECASE)
+        m = re.search(r"KowalskiStatus\s*:\s*(changed|already_done|blocked)", text, flags=re.IGNORECASE)
         return m.group(1).lower() if m else None
 
     def _strip_fences(self, text):
@@ -147,7 +147,7 @@ class Executor:
             if not self._ping():
                 fails += 1
                 if fails >= 3:
-                    print("🔥 [Ralph] DFlash died DURING the task — aborting agent.")
+                    print("🔥 [Kowalski] DFlash died DURING the task — aborting agent.")
                     server_crashed.set()
                     self._kill_proc(proc)
                     return
@@ -215,7 +215,7 @@ class Executor:
         ]
         max_tokens = task.get("max_tokens", 8192)
         print(
-            f"✍️  [Ralph] Direct-generating {out_file} using model '{self.model_name}' "
+            f"✍️  [Kowalski] Direct-generating {out_file} using model '{self.model_name}' "
             f"(context: {context or 'none'})"
         )
         self._dbg(f"DIRECT INPUT · task {task.get('id')} · attempt {attempt}", messages)
@@ -225,7 +225,7 @@ class Executor:
             try:
                 piece, finish = self._post_chat(messages, max_tokens)
             except Exception as e:
-                print(f"❌ [Ralph] Direct call failed: {e}")
+                print(f"❌ [Kowalski] Direct call failed: {e}")
                 return "TIMEOUT"
             self._dbg(f"DIRECT OUTPUT · task {task.get('id')} · round {rnd + 1} · finish={finish}", piece)
             full += piece
@@ -237,12 +237,12 @@ class Executor:
                 "Continue the file from EXACTLY where you stopped. Do NOT repeat any previous "
                 "lines, do NOT add fences or commentary — output only the remaining raw content."})
         else:
-            print("⚠️  [Ralph] Still truncated after continuations; writing partial (verify will catch it).")
+            print("⚠️  [Kowalski] Still truncated after continuations; writing partial (verify will catch it).")
 
         code = self._strip_fences(full)
         with open(os.path.join(self.dev_root, out_file), "w", encoding="utf-8") as f:
             f.write(code)
-        print(f"📝 [Ralph] Wrote {out_file} ({len(code)} bytes).")
+        print(f"📝 [Kowalski] Wrote {out_file} ({len(code)} bytes).")
         return "OK" if verify(task, self.dev_root, self.git_manager, self.config) else "VERIFY_FAILED"
 
     def run_direct_context_fallback(self, task, attempt=1):
@@ -270,7 +270,7 @@ class Executor:
                 f"Focus ONLY on {out_file}. Keep all unrelated behavior unchanged. "
                 f"If {out_file} already satisfies the requirement, return its equivalent complete file."
             )
-            print(f"🛟 [Ralph] Direct fallback {idx}/{len(ordered)} on {out_file}...")
+            print(f"🛟 [Kowalski] Direct fallback {idx}/{len(ordered)} on {out_file}...")
             out = self.run_direct_task(subtask, attempt=attempt)
             if out == "TIMEOUT":
                 return "TIMEOUT"
@@ -295,7 +295,7 @@ class Executor:
             "- Do not emit non-text content blocks, JSON wrappers, XML tags, or markdown wrappers.\n"
             "- If unsure, respond with a single minimal valid action in plain text.\n"
             "- In your final plain-text result include exactly one status line: "
-            "RalphStatus: changed OR RalphStatus: already_done OR RalphStatus: blocked."
+            "KowalskiStatus: changed OR KowalskiStatus: already_done OR KowalskiStatus: blocked."
         )
         if file:
             sys_prompt += (f" Use the Edit tool to make minimal, targeted changes to {file}; "
@@ -325,7 +325,7 @@ class Executor:
             "Never emit structured content blocks, XML/JSON wrappers, markdown fences, or rich blocks."
         )
 
-        print(f"⚙️  [Ralph] Running Task {task.get('id')} (agentic, turns={self.config['max_turns']}) in {self.dev_root}")
+        print(f"⚙️  [Kowalski] Running Task {task.get('id')} (agentic, turns={self.config['max_turns']}) in {self.dev_root}")
         self._dbg(
             f"AGENT INPUT · task {task.get('id')} · attempt {attempt} · resuming={resuming}",
             f"PROMPT:\n{prompt}\n\nAPPENDED SYSTEM PROMPT:\n{sys_prompt}\n\n"
@@ -338,7 +338,7 @@ class Executor:
             run_cmd = list(cmd)
             if fmt_try > 0:
                 run_cmd += ["--append-system-prompt", recovery_prompt]
-                print(f"↻ [Ralph] Retrying task {task.get('id')} with format-safe prompt ({fmt_try}/{format_retries})...")
+                print(f"↻ [Kowalski] Retrying task {task.get('id')} with format-safe prompt ({fmt_try}/{format_retries})...")
 
             server_crashed = threading.Event()
             proc = subprocess.Popen(run_cmd, cwd=self.dev_root, text=True,
@@ -369,9 +369,9 @@ class Executor:
         except (json.JSONDecodeError, TypeError):
             self._dbg(f"AGENT OUTPUT (unparseable) · task {task.get('id')}", (stdout or stderr or "<empty>"))
             if self._is_content_block_error(stdout or "") or self._is_content_block_error(stderr or ""):
-                print("ℹ️  [Ralph] Detected non-text content-block formatting error from provider.")
+                print("ℹ️  [Kowalski] Detected non-text content-block formatting error from provider.")
                 return "FORMAT_ERROR"
-            print("❌ [Ralph] Could not parse CLI JSON:", (stdout or stderr or "<empty>")[:300])
+            print("❌ [Kowalski] Could not parse CLI JSON:", (stdout or stderr or "<empty>")[:300])
             return "BAD_OUTPUT"
 
         self._dbg(f"AGENT OUTPUT · task {task.get('id')}", self._agent_transcript(data))
@@ -392,22 +392,22 @@ class Executor:
         if isinstance(detail, (dict, list)):
             detail = json.dumps(detail)
         detail = str(detail)
-        ralph_status = self._extract_ralph_status(detail)
+        kowalski_status = self._extract_kowalski_status(detail)
 
-        if ralph_status == "blocked":
-            print("ℹ️  [Ralph] Agent reported RalphStatus: blocked")
+        if kowalski_status == "blocked":
+            print("ℹ️  [Kowalski] Agent reported KowalskiStatus: blocked")
             return "AGENT_ERROR"
 
-        if ralph_status == "already_done" and (not is_error) and subtype == "success":
-            print("ℹ️  [Ralph] Agent reported RalphStatus: already_done")
+        if kowalski_status == "already_done" and (not is_error) and subtype == "success":
+            print("ℹ️  [Kowalski] Agent reported KowalskiStatus: already_done")
             return "ALREADY_DONE"
 
         if subtype in ("error_max_turns", "error_during_execution"):
-            print(f"ℹ️  [Ralph] subtype={subtype}. Detail: {detail[:200]}")
+            print(f"ℹ️  [Kowalski] subtype={subtype}. Detail: {detail[:200]}")
             return "AGENT_ERROR"
 
         if is_error or subtype != "success":
-            print(f"ℹ️  [Ralph] DIRTY finish: is_error={is_error}, subtype={subtype}. Detail: {detail[:200]}")
+            print(f"ℹ️  [Kowalski] DIRTY finish: is_error={is_error}, subtype={subtype}. Detail: {detail[:200]}")
             low = detail.lower()
             if "tim" in low and "out" in low:
                 return "TIMEOUT"

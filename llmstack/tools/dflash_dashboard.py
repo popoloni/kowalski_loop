@@ -2,12 +2,12 @@ import csv
 import json
 import os
 import re
-import subprocess
 import time
 import urllib.request
 from collections import deque
 
 import psutil
+from llmstack.services.inference_probe import detect_running_model
 from rich.align import Align
 from rich.layout import Layout
 from rich.live import Live
@@ -119,57 +119,16 @@ def _load_runtime_config(config_path=CONFIG_PATH):
         "active_target": active_target,
         "active_type": active_type,
     }
-
-
-def _served_model_id(timeout=1.0):
-    try:
-        with urllib.request.urlopen(HEALTH_URL, timeout=timeout) as resp:
-            if resp.getcode() != 200:
-                return None
-            payload = json.loads(resp.read().decode("utf-8"))
-    except Exception:
-        return None
-    data = payload.get("data") if isinstance(payload, dict) else None
-    if isinstance(data, list) and data:
-        first = data[0]
-        if isinstance(first, dict):
-            return first.get("id")
-    return None
-
-
-def _cmdline_for_port(port=8787):
-    try:
-        pid_lines = subprocess.check_output(["lsof", "-ti", f"tcp:{port}"], text=True).strip().splitlines()
-    except Exception:
-        pid_lines = []
-    if not pid_lines:
-        return None
-    pid = pid_lines[0].strip()
-    if not pid:
-        return None
-    try:
-        return subprocess.check_output(["ps", "-ww", "-p", pid, "-o", "command="], text=True).strip()
-    except Exception:
-        return None
-
-
 def detect_active_backend(cfg):
-    cmd = (_cmdline_for_port(8787) or "").lower()
-    served = _served_model_id()
+    probe = detect_running_model(health_url=HEALTH_URL, timeout=1.0, expected_target=cfg.get("active_target"))
+    served = probe.get("model_id")
+    backend = probe.get("backend_name")
+    confidence = probe.get("confidence", "low")
 
-    if "turboquant-serve" in cmd:
-        backend = "turboquant"
-        confidence = "high"
-    elif "mlx_lm.server" in cmd or "mlx_lm server" in cmd:
-        backend = "mlx"
-        confidence = "high"
-    elif " dflash " in cmd or "dflash serve" in cmd:
-        backend = "dflash"
-        confidence = "high"
-    elif cfg.get("active_type") in ("turboquant", "dflash", "mlx"):
+    if backend not in ("turboquant", "dflash", "mlx") and cfg.get("active_type") in ("turboquant", "dflash", "mlx"):
         backend = cfg["active_type"]
         confidence = "medium"
-    else:
+    elif backend not in ("turboquant", "dflash", "mlx"):
         backend = "unknown"
         confidence = "low"
 

@@ -10,7 +10,7 @@ class SupervisedMode(PlanMode):
         label = task.get("title") or task.get("prompt") or f"Task {task.get('id')}"
         file_name = task.get("file") or "(no file)"
         priority = self._task_priority(task)
-        print("\n👀 [Ralph] Supervised preview")
+        print("\n👀 [Kowalski] Supervised preview")
         print(f"  task={task.get('id')} priority={priority} file={file_name}")
         print(f"  {label}")
         if task.get("prompt"):
@@ -38,7 +38,7 @@ class SupervisedMode(PlanMode):
             if decision == "skip":
                 task["status"] = "skipped"
                 self._persist_plan()
-                print(f"⏭️  [Ralph] Task {task.get('id')} skipped by user.")
+                print(f"⏭️  [Kowalski] Task {task.get('id')} skipped by user.")
                 continue
 
             self.services.stop()

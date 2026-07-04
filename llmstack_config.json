@@ -1,6 +1,6 @@
 {
-  "dev_root": "./pacman_clone",
-  "plan_file": "./pacman_clone/.claude/plans/improvements_plan.json",
+  "dev_root": "./prj/space_invaders_clone",
+  "plan_file": "./prj/space_invaders_clone/.claude/plans/my_plan.json",
   "log_dir": "./logs",
   "dflash_log": "./logs/dflash_server.log",
   "headroom_log": "./logs/headroom.log",
@@ -15,13 +15,13 @@
   "agent_format_retries": 2,
   "allow_already_done_if_verified": true,
   "size_threshold_bytes": 12000,
-  "debug_log": "./logs/ralph_debug.log",
+  "debug_log": "./logs/kowalski_debug.log",
   "debug_max_chars": 0,
   "agent_tools": [
     "Read",
     "Edit"
   ],
-  "active_model": "mlx-gemma4-12b",
+  "active_model": "dflash-qwen35b-moe",
   "models": {
     "dflash-qwen27b-dense": {
       "type": "dflash",
