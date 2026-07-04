@@ -19,6 +19,7 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.pyc
+*.egg-info/
 
 # macOS
 .DS_Store
