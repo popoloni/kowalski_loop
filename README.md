@@ -2,6 +2,8 @@
 
 A local stack for running a quantized LLM (Qwen3-27B, Qwen3-35B or Gemma4-12B) on Apple Silicon via **DFlash/TurboQuant/MLX** inference backend, with a compression proxy (**Headroom**), a Claude Code router (**ccr**), and an unattended supervisor (**Kowalski**) driving **Claude Code** agent.
 
+![The Kowalski Loop Banner](docs/img/medium_article_03_pdf/figure_205_p01.png)
+
 Default installation folder in examples: `~/local-llm-workspace` (folder name only; project name is **Kowalski Loop**).
 
 ---
