@@ -630,7 +630,7 @@ Phase 0 introduced `control/bus.py` + `control/state.py`. Here we expose them af
 
 Installation is automated **only after the codebase is modular and feature-complete**, so the installer provisions a known-good structure rather than a moving target.
 
-> **Ground truth (verified on the working machine, 2026-06-26).** The installer must replicate this *exactly*; these values were captured from the live setup, not from `install.md` (which omits Headroom entirely):
+> **Ground truth (verified on the working machine, 2026-06-26).** The installer must replicate this *exactly*; these values were captured from the live setup. The manual guide is now `INSTALL.md` (root), which documents the full flow including Headroom:
 > - **Project venv:** `env/` built with **Python 3.14** (`/opt/homebrew/opt/python@3.14`).
 > - **Headroom venv:** a **separate** `~/headroom-env/` built with **Python 3.13** (`/opt/homebrew/opt/python@3.13`). Headroom is **not** compatible with the 3.14 project venv and must stay isolated.
 > - **Headroom package name is `headroom-ai`** (currently `0.26.0`), exposed as the `headroom` executable. `pip install headroom` is WRONG.
@@ -670,7 +670,7 @@ These are the manual gotchas that took trial-and-error and MUST be scripted:
 | 16 | Generate `llmstack_config.json` | From `kowalski_config.template.json`; prompt for `dev_root` (or run `llmstack init`) |
 | 17 | Pre-seed folder trust | Write `hasTrustDialogAccepted`/`hasCompletedProjectOnboarding` for `dev_root` into `~/.claude.json` |
 | 18 | Smoke test | `llmstack doctor` then: start the **active model's server** (`dflash serve` or `turboquant-serve`) → wait health on `:8787/v1/models` → start Headroom → assert it logged upstream `127.0.0.1:8787` and answers `:8789/health` → `ccr restart` → one `ccr code -p "say OK" --max-turns 1` round-trip → shut all down |
-| 19 | Print next steps | Interactive (`ccr_interactive.bash`) vs Autonomous (`kowalski_launcher.bash`) |
+| 19 | Print next steps | Interactive (`bin/launch_ccr.bash`) vs Autonomous (`bin/launch_kowalski.bash`) |
 
 **Headroom launch contract the installer/service must honor (verbatim from the working launchers):**
 ```bash
@@ -699,6 +699,8 @@ Checks, with the exact expectations above:
 
 ### 9.3 `install/update.sh`
 Update `dflash-mlx`/`turboquant-mlx-full` (project venv), **`headroom-ai`** (its 3.13 venv), `pip` deps, npm globals (`claude` + `ccr`), then `ccr restart`. Optionally check HF for newer model revisions. Print resulting versions.
+
+> An interim manual equivalent already exists: `bin/update_stack.bash` (npm globals, project-venv packages, `headroom-ai` refresh, `ccr restart`, with `--dry-run` support). `install/update.sh` should supersede it or wrap it.
 
 ---
 

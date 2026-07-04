@@ -51,12 +51,12 @@ fi
 echo "\n🗜️  Headroom env (${HEADROOM_ENV_DIR})"
 if [[ -x "${HEADROOM_ENV_DIR}/bin/python" ]]; then
 	run "${HEADROOM_ENV_DIR}/bin/python" -m pip install -U pip setuptools wheel
-	# Headroom package name can vary by installation source; keep best-effort update.
+	# Real package name is 'headroom-ai' (exposes the 'headroom' executable).
 	if [[ "${DRY_RUN}" == "1" ]]; then
-		echo "[dry-run] ${HEADROOM_ENV_DIR}/bin/python -m pip install -U headroom"
+		echo "[dry-run] ${HEADROOM_ENV_DIR}/bin/python -m pip install -U headroom-ai"
 	else
-		if ! "${HEADROOM_ENV_DIR}/bin/python" -m pip install -U headroom; then
-			echo "⚠️  Could not update package 'headroom' (custom install is possible); continuing"
+		if ! "${HEADROOM_ENV_DIR}/bin/python" -m pip install -U headroom-ai; then
+			echo "⚠️  Could not update package 'headroom-ai' (custom install is possible); continuing"
 		fi
 	fi
 else

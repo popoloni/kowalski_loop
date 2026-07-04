@@ -39,12 +39,16 @@ Install base dependencies (once per machine):
 
 ```bash
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-brew install python node@20
+brew install python@3.14 python@3.13 node@20
 brew update
 brew reinstall node@20
 brew link --overwrite node@20
 node --version
 ```
+
+Why two Pythons:
+- `python@3.14` → project virtualenv (`env/`)
+- `python@3.13` → isolated Headroom virtualenv (`~/headroom-env/`); Headroom is not compatible with the 3.14 project venv and must stay isolated.
 
 Install Claude Code and CCR globally:
 
@@ -66,17 +70,20 @@ cd ~/local-llm-workspace
 # git clone <your-repo-url> .
 ```
 
-Create or reuse the virtual environment:
+Create or reuse the virtual environment (Python 3.14):
 
 ```bash
-test -d env || python3 -m venv env
+test -d env || python3.14 -m venv env
 source env/bin/activate
 python -m pip install -U pip setuptools wheel
 ```
 
-Install runtime packages used by the stack:
+Install the `llmstack` package (editable) and runtime packages used by the stack:
 
 ```bash
+# llmstack CLI/core (editable install from this repo)
+pip install -e .
+
 # DFlash backend
 pip install -U dflash-mlx
 
@@ -95,6 +102,19 @@ source env/bin/activate
 python bin/patch_dflash_mlx.py
 ```
 
+## 2a. Headroom Isolated Environment (Required)
+
+Headroom runs from its own Python 3.13 virtualenv, separate from the project env.
+The pip package name is `headroom-ai` (it exposes the `headroom` executable) — `pip install headroom` is the wrong package.
+
+```bash
+test -d ~/headroom-env || python3.13 -m venv ~/headroom-env
+~/headroom-env/bin/pip install -U pip headroom-ai
+~/headroom-env/bin/headroom --version
+```
+
+At runtime, `bin/start_headroom_server.bash` (via `llmstack.cli proxy`) launches `~/headroom-env/bin/headroom` with `VIRTUAL_ENV`/`PYTHONPATH`/`PYTHONHOME` unset and `OPENAI_TARGET_API_URL=http://127.0.0.1:8787`, so the proxy never inherits the project venv.
+
 ## 2b. Update Existing Installation (Recommended)
 
 For already-installed environments, use the workspace update script instead of repeating section 2:
@@ -109,7 +129,7 @@ What this script refreshes:
 - global npm tools (`@anthropic-ai/claude-code`, `@musistudio/claude-code-router`)
 - workspace Python packages (`dflash-mlx`, `turboquant-mlx-full`, `mlx-lm`, `transformers`, `rich`, `psutil`, `httpx`, `huggingface_hub[cli]`)
 - local DFlash compatibility patch (`bin/patch_dflash_mlx.py`)
-- headroom environment (best-effort)
+- Headroom environment (`headroom-ai` in `~/headroom-env/`)
 - router restart (`ccr restart`)
 
 Note: the real (non dry-run) run restarts the CCR router daemon. Run `--dry-run` first, and avoid the real run while an interactive/autonomous session is in progress.
@@ -208,6 +228,12 @@ Notes:
 - For DFlash, both `target` and `draft` are required.
 - If a repo is gated, you must accept its license on Hugging Face first.
 - Pre-downloading drafts avoids first-run startup timeout.
+
+### CCR config and folder trust (automatic)
+
+You do not need to hand-edit `~/.claude-code-router/config.json` or `~/.claude.json`:
+- `llmstack model use <name>`, `serve`, `interactive`, and `run` render the multi-model CCR config (providers pinned to Headroom `:8789`, `Router.*` → active model) and restart `ccr`.
+- `llmstack run`/`interactive` pre-trust `dev_root` in `~/.claude.json` (`hasTrustDialogAccepted`, `hasCompletedProjectOnboarding`), so unattended runs don't block on the trust dialog.
 
 ## 6. Start the Three Services
 
