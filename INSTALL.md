@@ -334,6 +334,6 @@ High instability under load:
 ## Source References
 
 Commands and flow in this guide were aligned with:
-- `README.md`
-- `docs/medium_article_01_install.md`
-- wrapper scripts in `bin/`
+- [README.md](README.md)    
+- Medium article: [The Ultimate Local AI Setup Guide for Apple Silicon using DFlash](https://medium.com/@enricopapalini/llmstack-local-kowalski-loop-setup-on-macos-apple-silicon-1e3f5c8b6d0e)
+- wrapper scripts in [bin/](bin/)
