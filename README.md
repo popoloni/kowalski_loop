@@ -138,7 +138,10 @@ To monitor real-time metrics, run `bin/launch_dashboard.bash` or `python -m llms
 3. [How to Run](#how-to-run) — step-by-step walkthroughs for both modes.
 4. [Model Configuration](#model-configuration) — model/backend switching and stability presets in depth.
 5. [MEMORY.md](MEMORY.md) — RAM-tier sizing, model trade-offs, and stability guardrails.
-6. Advanced references — [Kowalski Configuration](#advanced-reference-kowalski-configuration-llmstack_configjson), [Task Schema](#advanced-reference-task-schema-plan-json), [Executor Selection](#advanced-reference-executor-selection), [Loop Modes](#loop-modes).
+6. [HEADROOM.md](HEADROOM.md) — context compression efficiency, savings thresholds, and session-scale analysis.
+7. [DFLASH.md](DFLASH.md) — speculative decoding efficiency, cache thresholds, and prefill gain analysis.
+8. [SAVINGS.md](SAVINGS.md) — cross-layer synthesis of memory pressure, prompt compression, and cache reuse.
+9. Advanced references — [Kowalski Configuration](#advanced-reference-kowalski-configuration-llmstack_configjson), [Task Schema](#advanced-reference-task-schema-plan-json), [Executor Selection](#advanced-reference-executor-selection), [Loop Modes](#loop-modes).
 
 ---
 
@@ -592,6 +595,7 @@ bash bin/update_stack.bash
 
 - Model/backend selection is **registry-driven** from `llmstack_config.json` (`active_model` + `models` map), loaded by `llmstack/models/registry.py`.
 - For RAM-tier sizing, model class trade-offs, and stability guardrails, see [MEMORY.md](MEMORY.md).
+- For a cross-layer synthesis of memory, compression, and cache reuse, see [SAVINGS.md](SAVINGS.md).
 - The active model resolves to a backend type and target model; supported backend types are:
   - `dflash`
   - `mlx`
