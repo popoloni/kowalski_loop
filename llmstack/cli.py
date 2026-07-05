@@ -306,7 +306,7 @@ def _sync_ccr_for_active_model(config, restart=False):
         ccr.restart()
 
 
-def _restart_inference_server_if_running(config):
+def _restart_inference_server_if_running(config, force=False):
     """Swap the running inference server (DFlash/TurboQuant) to the active backend.
 
     No-op if nothing is currently serving on :8787 — the next `llmstack run`/`serve`
@@ -321,7 +321,13 @@ def _restart_inference_server_if_running(config):
               "(it will start with the active backend on next 'llmstack run').")
         return
     if served == expected:
-        print(f"✅ [llmstack] Inference server already serving '{expected}'.")
+        if not force:
+            print(f"✅ [llmstack] Inference server already serving '{expected}'.")
+            return
+        print(f"♻️  [llmstack] Forcing inference server restart for '{expected}' to apply updated settings...")
+        stack.dflash._free_port()
+        stack.dflash._stop = False
+        stack.dflash.ensure_running()
         return
     print(f"♻️  [llmstack] Swapping inference server: '{served}' -> '{expected}' (loading into RAM)...")
     stack.dflash._stop = False
@@ -647,8 +653,18 @@ def run_model(config, args):
             print("ℹ️  [llmstack] Backend-specific profile overrides cleared (single-knob mode).")
 
         if restart:
-            _restart_inference_server_if_running(config)
-            print("✅ [llmstack] Running inference server (if any) restarted with new preset.")
+            watchdog_pid = _active_watchdog_pid(config)
+            if watchdog_pid and watchdog_pid != os.getpid():
+                print(
+                    "⚠️  [llmstack] Preset saved, but live restart was skipped: "
+                    f"watchdog PID {watchdog_pid} is managing the running loop with an in-memory config."
+                )
+                print(
+                    "   Restart 'llmstack run' to apply the new preset safely and avoid backend restart races."
+                )
+            else:
+                _restart_inference_server_if_running(config, force=True)
+                print("✅ [llmstack] Running inference server (if any) restarted with new preset.")
         else:
             print("ℹ️  Add --restart to apply immediately to a running server.")
         return 0

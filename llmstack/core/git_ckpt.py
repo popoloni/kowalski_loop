@@ -30,7 +30,7 @@ class GitManager:
         print("📦 [Kowalski] Git ready (last verified state protected).")
 
     def changed_files(self):
-        out = self.git("status", "--porcelain").stdout
+        out = self.git("status", "--porcelain", "--untracked-files=all").stdout
         files = set()
         for line in out.splitlines():
             p = line[3:].strip()

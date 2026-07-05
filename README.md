@@ -4,13 +4,11 @@ A local stack for running a quantized LLM (Qwen3-27B, Qwen3-35B or Gemma4-12B) o
 
 ![The Kowalski Loop Banner](docs/img/medium_article_03_pdf/figure_205_p01.png)
 
-Default installation folder in examples: `~/local-llm-workspace` (folder name only; project name is **Kowalski Loop**).
-
----
-
 ## 🚀 Quick Start
 
 Practical recipes first — every step is explained in depth later in this document.
+Before using the framework, follow the installation guide: [INSTALL.md](INSTALL.md).
+Default installation folder in examples: `~/local-llm-workspace` (folder name only; project name is **Kowalski Loop**).
 
 ### 1. Interactive mode in 60 seconds (attended)
 
@@ -200,12 +198,66 @@ python -m llmstack.cli model preset safest --restart
 
 Full details: [Backend stability presets (all backends)](#backend-stability-presets-all-backends).
 
+### Runtime reliability notes (2026-07)
+
+The following behaviors are now documented and expected when operating long unattended runs.
+
+#### 1) Module entrypoint support
+
+You can now invoke `llmstack` directly as a Python module:
+
+```bash
+python -m llmstack --help
+python -m llmstack model preset balanced --restart
+```
+
+Important: use the project virtual environment interpreter when available (for example `env/bin/python3`) to avoid missing dependency errors from a global Python.
+
+#### 2) Safe preset application while a loop is running
+
+`llmstack model preset <preset> --restart` applies the preset immediately only when it is safe.
+
+- If no active watchdog-owned loop is running, it restarts inference live.
+- If a watchdog-owned loop is running, live restart is intentionally skipped and a warning is shown.
+
+This avoids backend restart races and port rebind conflicts during active generation. In this case, restart the loop process to apply the new preset safely.
+
+#### 3) Direct-mode degeneration guardrail
+
+Direct generation now includes a conservative anti-degeneration guard before file write.
+
+If extreme output corruption is detected, the write is skipped and the task is retried through normal verification feedback instead of committing unusable output.
+
+Current hardcoded thresholds (conservative):
+
+- Guardrail evaluates only for outputs >= 12000 chars
+- Repeated single-character run threshold: >= 512
+- Repeated long identifier threshold: >= 140 occurrences
+- Low-diversity check applies when extracted tokens >= 200
+- Low-diversity trigger: unique token ratio < 0.06
+
+These thresholds are intentionally strict to reduce false positives on valid large files.
+
+#### 4) Direct traffic now goes through Headroom
+
+Direct generation is now routed through the configured Headroom OpenAI-compatible endpoint instead of hitting the inference backend directly.
+
+- This makes direct-mode requests visible in `logs/headroom_traffic.jsonl` and in the dashboard request panels.
+- The actual URLs are derived from `llmstack_config.json` (`local_host`, `inference_port`, `headroom_port`) rather than hardcoded in the Python runtime.
+
+#### 5) Agent format fallback writes only the target file
+
+If an agent task uses `"on_format_error": "direct_context_fallback"`, Kowalski now regenerates only the task's declared `file`.
+
+- Context files are still read and injected as references.
+- Context files are no longer rewritten during fallback.
+
 ---
 
 ## Architecture
 
 ```
-Claude Code  →  ccr (Claude Code Router)  →  Headroom proxy :8789  →  Inference server :8787 (DFlash/MLX/TurboQuant)  →  Apple GPU
+Claude Code  →  ccr (Claude Code Router)  →  Headroom proxy :headroom_port  →  Inference server :inference_port (DFlash/MLX/TurboQuant)  →  Apple GPU
 ```
 
 | Component | Port | Description |
@@ -213,17 +265,17 @@ Claude Code  →  ccr (Claude Code Router)  →  Headroom proxy :8789  →  Infe
 | Kowalski Supervisor (opt) | — | Python orchestrator that starts the servers, warms the cache, and runs tasks in a loop inside Claude Code |
 | Claude Code | - | Anthropic agentic coding assistant |
 | Claude Code Router (ccr) | — | Routes Claude Code requests to Headroom instead of Anthropic cloud |
-| Headroom proxy | `8789` | Proxy that compresses context in a code-aware manner before sending to DFlash |
-| Inference server (DFlash/MLX/TurboQuant) | `8787` | OpenAI-compatible local inference endpoint selected from model registry |
+| Headroom proxy | `headroom_port` (default `8789`) | Proxy that compresses context in a code-aware manner before sending to the local inference backend |
+| Inference server (DFlash/MLX/TurboQuant) | `inference_port` (default `8787`) | OpenAI-compatible local inference endpoint selected from model registry |
 
 ---
 
 ## Prerequisites
 
 - macOS with Apple Silicon (MLX requires Metal)
-- [Claude Code](https://docs.anthropic.com/claude-code) (`claude`) installed globally via npm
+- [Claude Code](https://docs.anthropic.com/claude-code) (`claude`) installed globally via npm (Node.js 22+)
 - [Claude Code Router](https://github.com/musistudio/claude-code-router) (`ccr`) installed globally via npm
-- [Headroom](https://github.com/musistudio/headroom) installed in `~/headroom-env/`
+- [Headroom](https://github.com/chopratejas/headroom) installed in `~/headroom-env/`
 - Python virtualenv in `./env/` with `dflash-mlx` and dependencies (already included)
 
 ### Model Artifacts (Required)
@@ -240,6 +292,8 @@ Recommended before first run:
 2. Pre-download gated drafts to avoid startup timeout on first serve (example: `hf download z-lab/Qwen3.6-27B-DFlash`).
 3. Ensure every configured `target` (and `draft` for DFlash) exists and is accessible.
 
+`hf` can come either from the Homebrew package `hf` or from `pip install -U huggingface_hub`; [INSTALL.md](INSTALL.md) documents both paths.
+
 Reference walkthrough (installation article): [docs/medium_article_01_install.md](docs/medium_article_01_install.md).
 
 ---
@@ -250,13 +304,13 @@ Reference walkthrough (installation article): [docs/medium_article_01_install.md
 |---|---|
 | **Standalone Launchers** | |
 | `bin/start_dflash_server.bash` | Starts the inference watchdog in background for DFlash (`python -m llmstack.cli serve --watchdog`). Default model = active DFlash model unless overridden with first arg. Watchdog logs: `logs/dflash_watchdog.log`; server logs: `logs/dflash_server.log`. |
-| `bin/start_mlx_server.bash` | Starts the same inference watchdog in background for MLX (default model: `mlx-gemma4-12b`, override with first arg). Same `:8787` endpoint and log paths as above. |
-| `bin/start_turboquant_server.bash` | Starts the same inference watchdog in background for TurboQuant (default model: `turboquant-qwen35b-moe`, override with first arg). Same `:8787` endpoint and log paths as above. |
-| `bin/start_headroom_server.bash` | Starts only the Headroom proxy on `127.0.0.1:8789` (upstream `:8787`, logs to `logs/headroom_traffic.jsonl`). Resilient launcher: health-first/idempotent start, anti-concurrent lock, stale-process cleanup, and retry with backoff (`HEADROOM_START_RETRIES`, default `3`). |
-| `bin/stop_dflash_server.bash` | Stops the inference watchdog (if running) and then stops whichever inference process is bound to `8787` (graceful stop with force-kill fallback). |
-| `bin/stop_mlx_server.bash` | Stops the inference watchdog (if running) and then stops whichever inference process is bound to `8787` (graceful stop with force-kill fallback). |
-| `bin/stop_turboquant_server.bash` | Stops the inference watchdog (if running) and then stops whichever inference process is bound to `8787` (graceful stop with force-kill fallback). |
-| `bin/stop_headroom_server.bash` | Stops Headroom on port `8789` (graceful stop with force-kill fallback, plus stale-process safety net). |
+| `bin/start_mlx_server.bash` | Starts the same inference watchdog in background for MLX (default model: `mlx-gemma4-12b`, override with first arg). Same configured `inference_port` endpoint and log paths as above. |
+| `bin/start_turboquant_server.bash` | Starts the same inference watchdog in background for TurboQuant (default model: `turboquant-qwen35b-moe`, override with first arg). Same configured `inference_port` endpoint and log paths as above. |
+| `bin/start_headroom_server.bash` | Starts only the Headroom proxy on `local_host:headroom_port` (default `127.0.0.1:8789`, upstream `inference_port`, logs to `logs/headroom_traffic.jsonl`). Resilient launcher: health-first/idempotent start, anti-concurrent lock, stale-process cleanup, and retry with backoff (`HEADROOM_START_RETRIES`, default `3`). |
+| `bin/stop_dflash_server.bash` | Stops the inference watchdog (if running) and then stops whichever inference process is bound to the configured `inference_port` (graceful stop with force-kill fallback). |
+| `bin/stop_mlx_server.bash` | Stops the inference watchdog (if running) and then stops whichever inference process is bound to the configured `inference_port` (graceful stop with force-kill fallback). |
+| `bin/stop_turboquant_server.bash` | Stops the inference watchdog (if running) and then stops whichever inference process is bound to the configured `inference_port` (graceful stop with force-kill fallback). |
+| `bin/stop_headroom_server.bash` | Stops Headroom on the configured `headroom_port` (graceful stop with force-kill fallback, plus stale-process safety net). |
 | `bin/launch_ccr.bash` | **Interactive Claude Code** — starts `ccr code` with `acceptEdits` by default, pre-trusted folders, optimized system prompt. Changes to project folder (`dev_root` from config). Reads config from `llmstack_config.json`. |
 | `bin/launch_dashboard.bash` | Launches the terminal monitoring dashboard (TPS, cache %, memory, requests, and live engine statuses). Header is intentionally compact: inference engine, inference status, served model, and Headroom status. The Headroom panel also shows its status. |
 | **Autonomous Mode** | |
@@ -296,7 +350,7 @@ Then start Headroom:
 cd ~/local-llm-workspace
 bash bin/start_headroom_server.bash
 ```
-Starts compression proxy on `:8789` (upstream `:8787`) and leaves it managed in the background. Output → `logs/headroom.log` + `logs/headroom_traffic.jsonl`.
+Starts compression proxy on `headroom_port` (default `:8789`, upstream `inference_port`, default `:8787`) and leaves it managed in the background. Output → `logs/headroom.log` + `logs/headroom_traffic.jsonl`.
 
 #### 1b. Start interactive Claude Code
 
@@ -471,7 +525,7 @@ Kowalski will:
 🤖 Booting Kowalski Unattended Agent System...
 ⏱️  Timeout centralized: 3600s applied to env + CCR config.json.
 ✅ DFlash ONLINE & HEALTHY
-🗜️  Headroom proxy on :8789 → dflash :8787...
+🗜️  Headroom proxy on configured `headroom_port` → inference backend on configured `inference_port`...
 🔄 Restarting Claude Code Router daemon...
 🚀 Handing over control to Kowalski Orchestrator...
 ⏳ Waiting for model to load into RAM...
@@ -540,7 +594,10 @@ bash bin/update_stack.bash
   - `dflash`
   - `mlx`
   - `turboquant`
-- All inference backends serve on `127.0.0.1:8787`; Headroom serves on `127.0.0.1:8789`.
+- Network endpoints are config-driven from `llmstack_config.json`:
+  - `local_host` (default `127.0.0.1`)
+  - `inference_port` (default `8787`)
+  - `headroom_port` (default `8789`)
 
 ### Model selection commands
 
@@ -562,7 +619,7 @@ python -m llmstack.cli model preset stable
 python -m llmstack.cli model preset safest --restart
 ```
 
-When `model use`/`recommend --apply` runs, llmstack syncs CCR and, if inference is already running on `:8787`, swaps it to the selected target model.
+When `model use`/`recommend --apply` runs, llmstack syncs CCR and, if inference is already running on the configured `inference_port`, swaps it to the selected target model.
 
 ### Serving a specific model/backend
 
@@ -583,7 +640,7 @@ bash bin/start_turboquant_server.bash
 bash bin/start_turboquant_server.bash turboquant-qwen35b-moe
 ```
 
-Note: only one inference watchdog should run at a time because all backends bind to port `8787`. If a watchdog is already running, start wrappers will exit without launching a second one.
+Note: only one inference watchdog should run at a time because all backends bind to the configured `inference_port` (default `8787`). If a watchdog is already running, start wrappers will exit without launching a second one.
 
 ### Backend stability presets (all backends)
 
@@ -655,7 +712,7 @@ Example:
 - `longContext`
 - `webSearch`
 
-to the currently active `<provider>,<target>` pair, with provider endpoints pinned to local Headroom (`http://127.0.0.1:8789/v1/chat/completions`).
+to the currently active `<provider>,<target>` pair, with provider endpoints pinned to the configured local Headroom chat endpoint derived from `local_host` + `headroom_port`.
 
 ### End-to-end switching examples
 
@@ -685,6 +742,9 @@ Complete reference of all available parameters:
 {
   "dev_root": "./prj/pacman_clone",
   "plan_file": "./prj/pacman_clone/.claude/plans/pacman_plan.json",
+  "local_host": "127.0.0.1",
+  "inference_port": 8787,
+  "headroom_port": 8789,
   "log_dir": "./logs",
   "dflash_log": "./logs/dflash_server.log",
   "headroom_log": "./logs/headroom.log",
@@ -771,6 +831,9 @@ Complete reference of all available parameters:
 |---|---|---|---|---|
 | **`dev_root`** | string | `"."` | Any valid directory path (relative or absolute) | Root directory where Claude Code operates. All file modifications and git operations are relative to this path. Example: `"./prj/pacman_clone"`, `"."`, `"/absolute/path"` |
 | **`plan_file`** | string | `"plan.json"` | Any valid file path inside `dev_root` | Path to the JSON file containing the task list to execute sequentially. Loaded fresh on each run. Example: `"plan.json"`, `".claude/plans/main.json"` |
+| **`local_host`** | string | `"127.0.0.1"` | Any bindable local interface/hostname | Shared host used to derive runtime URLs for inference, Headroom, dashboard health checks, and direct-mode routing. Keep `127.0.0.1` unless you intentionally expose the stack to another interface. |
+| **`inference_port`** | integer | `8787` | Any free TCP port | Port bound by the active inference backend (DFlash / MLX / TurboQuant). Used to derive `inference_base_url`, health probes, and local chat routing. |
+| **`headroom_port`** | integer | `8789` | Any free TCP port | Port bound by Headroom. Used to derive the OpenAI-compatible proxy URL that CCR and direct mode now use by default. |
 | **`active_model`** | string | first registry key | Any model name present in `models` | Model used by serve/interactive/run when no model override is passed on CLI. Recommended to set explicitly for deterministic behavior across machines. |
 | **`models`** | object | in-code defaults | map of model name → backend config | Model registry. Each entry defines at least `type` + `target`; DFlash entries should also define `draft`. If omitted, Kowalski falls back to built-in defaults in `llmstack/models/registry.py`. |
 | **`backend_stability_profile`** | string | `"balanced"` | `"performance"` &#124; `"balanced"` &#124; `"stable"` &#124; `"safest"` | Global stability preset for all backends when backend-specific profile keys are `null`. |
@@ -886,7 +949,7 @@ Kowalski applies a **verification pipeline** to every completed task:
 2. **Feature markers** — Checks that all strings in `expect` appear in the task's `file`. Ensures declared features are present.
 3. **Change gate** (controlled by `require_change`) — Verifies that the task actually modified `file`. Rejects no-ops.
 4. **Already-done override** (controlled by `allow_already_done_if_verified`) — for agent tasks only, if the agent reports `KowalskiStatus: already_done`, Kowalski re-runs deterministic gates with `require_change=false` for that attempt. Task completes only if verification still passes.
-5. **Format fallback (per-task strategy)** — if an agent task repeatedly fails with provider formatting errors, set `"on_format_error": "direct_context_fallback"` in that task to regenerate `file + context` with direct mode and then run standard verification.
+5. **Format fallback (per-task strategy)** — if an agent task repeatedly fails with provider formatting errors, set `"on_format_error": "direct_context_fallback"` in that task to regenerate only the declared `file` with direct mode while using `context` files as read-only references, then run standard verification.
 6. **Wiring check** (controlled by `wiring_check`) — Verifies no orphan JS and all referenced files exist.
 7. **Behavioral smoke** — Runs the task's `smoke` code (Node.js assertions). Catches runtime bugs.
 8. **Pluggable task plugins** (controlled by `verification_plugins`) — Runs extra shell-based checks filtered by task file / extension. Failing `fail` plugins feed stderr/stdout into smart retry.
@@ -1398,7 +1461,7 @@ Priority ordering still applies, so higher-priority tasks are presented first.
 4. **On Failure**:
   - **TIMEOUT** or **AGENT_ERROR** with valid progress → **resume** (up to `max_resumes`)
   - **FORMAT_ERROR** (provider/transport formatting) → internal agent retry with stricter format directive (up to `agent_format_retries`)
-    - If task has `"on_format_error": "direct_context_fallback"`, Kowalski falls back to direct generation on `file + context`, then applies standard verification gates
+    - If task has `"on_format_error": "direct_context_fallback"`, Kowalski falls back to direct generation of the task `file` only, using `context` as read-only input, then applies standard verification gates
   - **ALREADY_DONE** + `allow_already_done_if_verified=true` → verify with `require_change=false` for that attempt; if gates pass, task is marked complete
    - **VERIFY_FAILED** or no progress → **retry** (up to `max_retries`)
    - After max attempts → **halt** and print WIP state
@@ -1425,7 +1488,7 @@ Priority ordering still applies, so higher-priority tasks are presented first.
 
 ### Claude Code timeout
 - Increase `timeout_seconds` in `llmstack_config.json`
-- Check network: ensure Headroom (`8789`) is reachable
+- Check network: ensure Headroom on the configured `headroom_port` is reachable
 
 ### Task verification fails
 - Enable `debug_log` and review detailed gate output

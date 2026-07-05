@@ -15,6 +15,7 @@ class DFlashService(ServiceManager):
         self.backend = backend
         self.cmd = backend.build_serve_cmd()
         self.health_url = backend.health_url()
+        self.port = backend.serve_port()
         self.log_file = log_file
         self.server_process = None
         self._stop = False
@@ -26,15 +27,17 @@ class DFlashService(ServiceManager):
             return False
 
     def served_model_id(self, timeout=3):
-        """Return the model id currently served on :8787 via /v1/models, or None."""
+        """Return the model id currently served on the configured inference port via /v1/models, or None."""
         return served_model_id(
+            port=self.port,
             health_url=self.health_url,
             timeout=timeout,
             expected_target=self.backend.model_target(),
         )
 
-    def _free_port(self, port=8787):
+    def _free_port(self, port=None):
         """Kill any process holding the inference port so a different backend can bind it."""
+        port = self.port if port is None else port
         try:
             out = subprocess.check_output(["lsof", "-ti", f"tcp:{port}"], text=True).strip()
         except Exception:
@@ -63,9 +66,9 @@ class DFlashService(ServiceManager):
         served = self.served_model_id()
         if served is not None:
             if served == expected:
-                print(f"✅ [Kowalski] Inference server already serving '{served}' on :8787; reusing.")
+                print(f"✅ [Kowalski] Inference server already serving '{served}' on :{self.port}; reusing.")
                 return
-            print(f"♻️  [Kowalski] Port 8787 serves '{served}' but active model is '{expected}'; replacing...")
+            print(f"♻️  [Kowalski] Port {self.port} serves '{served}' but active model is '{expected}'; replacing...")
             self._free_port()
         print(f"🚀 [Kowalski] Starting inference server for model '{self.backend.model_name}'...")
         with open(self.log_file, "a") as log:

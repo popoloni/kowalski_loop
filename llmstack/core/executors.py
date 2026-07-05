@@ -7,7 +7,7 @@ import threading
 import time
 import urllib.request
 
-from llmstack.config import normalize_permission_mode, normalize_thinking_mode
+from llmstack.config import DEFAULT_CONFIG, normalize_permission_mode, normalize_thinking_mode
 from llmstack.core.gates import verify
 
 MAX_CONTINUATIONS = 6
@@ -15,19 +15,22 @@ MAX_CONTINUATIONS = 6
 
 class Executor:
     def __init__(self, config, dev_root, git_manager, debug_log=None, debug_max=0,
-                 health_url="http://127.0.0.1:8787/v1/models",
+                 health_url=None,
                  model_name="active-model",
                  model_target=None,
-                 direct_url="http://127.0.0.1:8787/v1/chat/completions"):
+                 direct_url=None):
         self.config = config
         self.dev_root = dev_root
         self.git_manager = git_manager
         self.debug_log = debug_log
         self.debug_max = debug_max
-        self.health_url = health_url
+        default_inference_url = f"http://{DEFAULT_CONFIG['local_host']}:{DEFAULT_CONFIG['inference_port']}/v1/models"
+        self.health_url = health_url or self.config.get("inference_health_url", default_inference_url)
         self.model_name = model_name
         self.model_target = model_target or "mlx-community/Qwen3.6-27B-4bit"
-        self.direct_url = direct_url
+        default_headroom_url = f"http://{DEFAULT_CONFIG['local_host']}:{DEFAULT_CONFIG['headroom_port']}/v1/chat/completions"
+        default_inference_chat_url = f"http://{DEFAULT_CONFIG['local_host']}:{DEFAULT_CONFIG['inference_port']}/v1/chat/completions"
+        self.direct_url = direct_url or self.config.get("headroom_chat_url", default_headroom_url) or self.config.get("inference_chat_url", default_inference_chat_url)
 
     def _dbg(self, label, payload):
         if not self.debug_log:
@@ -77,12 +80,47 @@ class Executor:
         return m.group(1).lower() if m else None
 
     def _strip_fences(self, text):
-        t = text.strip()
-        if t.startswith("```"):
-            t = t.split("\n", 1)[1] if "\n" in t else ""
-            if t.rstrip().endswith("```"):
-                t = t.rstrip()[:-3]
+        t = (text or "").strip()
+        # Prefer the first fenced block if present anywhere in the response.
+        m = re.search(r"```(?:[a-zA-Z0-9_+.-]+)?\n([\s\S]*?)\n```", t)
+        if m:
+            t = m.group(1)
+        else:
+            # If no complete block exists, drop standalone fence marker lines.
+            t = re.sub(r"(?m)^\s*```(?:[a-zA-Z0-9_+.-]+)?\s*$", "", t)
         return t.strip() + "\n"
+
+    def _detect_extreme_direct_degeneracy(self, code):
+        """Detect only extreme output corruption patterns to avoid false positives."""
+        text = code or ""
+        if len(text) < 12000:
+            return None
+
+        # 1) Very long single-character runs (e.g., zzzzz....)
+        run = re.search(r"(.)\1{511,}", text)
+        if run:
+            ch = run.group(1)
+            return f"extreme repeated character run detected ('{ch}' x512+)"
+
+        # 2) Repeated long token chunks with very high count.
+        # Conservative threshold to avoid valid repetitive code/data.
+        tokens = re.findall(r"[A-Za-z_][A-Za-z0-9_]{7,}", text)
+        if tokens:
+            counts = {}
+            for tok in tokens:
+                counts[tok] = counts.get(tok, 0) + 1
+            top_tok, top_count = max(counts.items(), key=lambda kv: kv[1])
+            if top_count >= 140:
+                return f"extreme repeated identifier detected ('{top_tok}' repeated {top_count} times)"
+
+        # 3) Very low lexical diversity combined with huge payload.
+        # Apply only on large files to reduce false positives.
+        if len(tokens) >= 200:
+            unique_ratio = len(set(tokens)) / float(len(tokens))
+            if unique_ratio < 0.06:
+                return f"very low token diversity detected (unique ratio={unique_ratio:.3f})"
+
+        return None
 
     def _retry_feedback_note(self, task):
         feedback = (task.get("_verify_feedback") or "").strip()
@@ -240,40 +278,44 @@ class Executor:
             print("⚠️  [Kowalski] Still truncated after continuations; writing partial (verify will catch it).")
 
         code = self._strip_fences(full)
-        with open(os.path.join(self.dev_root, out_file), "w", encoding="utf-8") as f:
+        degeneracy_reason = self._detect_extreme_direct_degeneracy(code)
+        if degeneracy_reason:
+            msg = (
+                "Direct output appears severely degenerate/corrupted and was rejected before write: "
+                f"{degeneracy_reason}. Regenerate the full file cleanly from scratch; no repeated filler text."
+            )
+            print(f"⚠️  [Kowalski] {msg}")
+            task["_verify_feedback"] = msg
+            return "VERIFY_FAILED"
+
+        output_path = os.path.join(self.dev_root, out_file)
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        with open(output_path, "w", encoding="utf-8") as f:
             f.write(code)
         print(f"📝 [Kowalski] Wrote {out_file} ({len(code)} bytes).")
         return "OK" if verify(task, self.dev_root, self.git_manager, self.config) else "VERIFY_FAILED"
 
     def run_direct_context_fallback(self, task, attempt=1):
         # Best-effort fallback when agent transport/format keeps failing.
-        # We regenerate each relevant file directly, then verify using the original task gate.
-        ordered = []
-        seen = set()
-        for f in [task.get("file")] + list(task.get("context") or []):
-            if not f or f in seen:
-                continue
-            seen.add(f)
-            ordered.append(f)
-
-        if not ordered:
+        # Regenerate only the task target file; context files remain read-only input.
+        out_file = task.get("file")
+        if not out_file:
             return "AGENT_ERROR"
 
-        for idx, out_file in enumerate(ordered, 1):
-            subtask = dict(task)
-            subtask["file"] = out_file
-            subtask["context"] = ordered
-            subtask["verify"] = None
-            subtask["prompt"] = (
-                f"{task.get('prompt', '').strip()}\n\n"
-                f"Fallback mode due to repeated agent format errors. "
-                f"Focus ONLY on {out_file}. Keep all unrelated behavior unchanged. "
-                f"If {out_file} already satisfies the requirement, return its equivalent complete file."
-            )
-            print(f"🛟 [Kowalski] Direct fallback {idx}/{len(ordered)} on {out_file}...")
-            out = self.run_direct_task(subtask, attempt=attempt)
-            if out == "TIMEOUT":
-                return "TIMEOUT"
+        subtask = dict(task)
+        subtask["file"] = out_file
+        subtask["verify"] = None
+        subtask["prompt"] = (
+            f"{task.get('prompt', '').strip()}\n\n"
+            "Fallback mode due to repeated agent format errors. "
+            f"Focus ONLY on {out_file}. Keep all unrelated behavior unchanged. "
+            f"Use context files only as references; do not rewrite them. "
+            f"If {out_file} already satisfies the requirement, return its equivalent complete file."
+        )
+        print(f"🛟 [Kowalski] Direct fallback on {out_file}...")
+        out = self.run_direct_task(subtask, attempt=attempt)
+        if out == "TIMEOUT":
+            return "TIMEOUT"
 
         return "OK" if verify(task, self.dev_root, self.git_manager, self.config) else "VERIFY_FAILED"
 

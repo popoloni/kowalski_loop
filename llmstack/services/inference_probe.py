@@ -2,8 +2,9 @@ import json
 import subprocess
 import urllib.request
 
+from llmstack.config import DEFAULT_CONFIG
 
-DEFAULT_HEALTH_URL = "http://127.0.0.1:8787/v1/models"
+DEFAULT_HEALTH_URL = f"http://{DEFAULT_CONFIG['local_host']}:{DEFAULT_CONFIG['inference_port']}/v1/models"
 
 
 def _fetch_model_ids(health_url=DEFAULT_HEALTH_URL, timeout=3):
@@ -26,7 +27,7 @@ def _fetch_model_ids(health_url=DEFAULT_HEALTH_URL, timeout=3):
     return model_ids
 
 
-def cmdline_for_port(port=8787):
+def cmdline_for_port(port=DEFAULT_CONFIG["inference_port"]):
     try:
         pid_lines = subprocess.check_output(["lsof", "-ti", f"tcp:{port}"], text=True).strip().splitlines()
     except Exception:
@@ -63,7 +64,7 @@ def model_from_cmdline(cmdline):
     return None
 
 
-def detect_running_model(port=8787, health_url=DEFAULT_HEALTH_URL, timeout=3, expected_target=None):
+def detect_running_model(port=DEFAULT_CONFIG["inference_port"], health_url=DEFAULT_HEALTH_URL, timeout=3, expected_target=None):
     cmdline = cmdline_for_port(port)
     backend_name, backend_confidence = detect_backend_from_cmdline(cmdline)
     active_model = model_from_cmdline(cmdline)
@@ -100,7 +101,7 @@ def detect_running_model(port=8787, health_url=DEFAULT_HEALTH_URL, timeout=3, ex
     }
 
 
-def served_model_id(port=8787, health_url=DEFAULT_HEALTH_URL, timeout=3, expected_target=None):
+def served_model_id(port=DEFAULT_CONFIG["inference_port"], health_url=DEFAULT_HEALTH_URL, timeout=3, expected_target=None):
     return detect_running_model(
         port=port,
         health_url=health_url,

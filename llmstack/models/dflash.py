@@ -66,7 +66,7 @@ class DFlashBackend(InferenceBackend):
             "dflash", "serve",
             "--model", c["target"],
             "--draft-model", c["draft"],
-            "--host", "127.0.0.1", "--port", "8787",
+            "--host", self.serve_host(), "--port", str(self.serve_port()),
             "--verify-mode", str(s["verify_mode"]),
             "--temp", str(s["temp"]),
             "--max-tokens", str(s["max_tokens"]),

@@ -7,6 +7,7 @@ import urllib.request
 from collections import deque
 
 import psutil
+from llmstack.config import DEFAULT_CONFIG, apply_runtime_network_defaults
 from llmstack.services.inference_probe import detect_running_model
 from rich.align import Align
 from rich.layout import Layout
@@ -15,8 +16,6 @@ from rich.panel import Panel
 from rich.table import Table
 
 CONFIG_PATH = "llmstack_config.json"
-HEALTH_URL = "http://127.0.0.1:8787/v1/models"
-HEADROOM_HEALTH_URL = "http://127.0.0.1:8789/health"
 START_AT_END = True
 RECENT_KEEP = 12
 DECODE_BAR_CAP = 8192
@@ -85,13 +84,15 @@ def _parse_ts(line):
 
 
 def _load_runtime_config(config_path=CONFIG_PATH):
-    cfg = {}
+    cfg = dict(DEFAULT_CONFIG)
     if os.path.exists(config_path):
         try:
             with open(config_path, encoding="utf-8") as f:
-                cfg = json.load(f)
+                cfg.update(json.load(f))
         except (OSError, json.JSONDecodeError):
-            cfg = {}
+            cfg = dict(DEFAULT_CONFIG)
+
+    apply_runtime_network_defaults(cfg)
 
     base_dir = os.path.dirname(os.path.abspath(config_path))
     log_dir = cfg.get("log_dir", "logs")
@@ -119,9 +120,12 @@ def _load_runtime_config(config_path=CONFIG_PATH):
         "active_model_name": active_name,
         "active_target": active_target,
         "active_type": active_type,
+        "inference_health_url": cfg["inference_health_url"],
+        "headroom_health_url": cfg["headroom_health_url"],
+        "inference_port": cfg["inference_port"],
     }
 def detect_active_backend(cfg):
-    probe = detect_running_model(health_url=HEALTH_URL, timeout=1.0, expected_target=cfg.get("active_target"))
+    probe = detect_running_model(port=cfg.get("inference_port", DEFAULT_CONFIG["inference_port"]), health_url=cfg["inference_health_url"], timeout=1.0, expected_target=cfg.get("active_target"))
     served = probe.get("model_id")
     backend = probe.get("backend_name")
     confidence = probe.get("confidence", "low")
@@ -424,12 +428,12 @@ class Monitor:
         inference_ok = False
         headroom_ok = False
         try:
-            inference_ok = urllib.request.urlopen(HEALTH_URL, timeout=1).getcode() == 200
+            inference_ok = urllib.request.urlopen(self.cfg["inference_health_url"], timeout=1).getcode() == 200
         except Exception:
             inference_ok = False
 
         try:
-            headroom_ok = urllib.request.urlopen(HEADROOM_HEALTH_URL, timeout=1).getcode() == 200
+            headroom_ok = urllib.request.urlopen(self.cfg["headroom_health_url"], timeout=1).getcode() == 200
         except Exception:
             headroom_ok = False
 

@@ -138,5 +138,11 @@ def load_active_backend(config):
     if merged_overrides:
         model_cfg["stability_overrides"] = merged_overrides
 
+    model_cfg["serve_host"] = config.get("local_host")
+    model_cfg["serve_port"] = int(config.get("inference_port", 8787))
+    model_cfg["inference_health_url"] = config.get("inference_health_url")
+    model_cfg["inference_chat_url"] = config.get("inference_chat_url")
+    model_cfg["headroom_chat_url"] = config.get("headroom_chat_url")
+
     backend = build_backend(model_name, model_cfg)
     return model_name, backend, registry

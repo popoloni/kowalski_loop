@@ -3,6 +3,7 @@ import signal
 import subprocess
 import time
 
+from llmstack.config import DEFAULT_CONFIG
 from llmstack.models.registry import load_active_backend
 
 from .ccr_service import CCRService
@@ -15,12 +16,15 @@ class ServiceStack:
         self.config = config
         self._stop = False
         self.active_model_name, self.backend, self.model_registry = load_active_backend(config)
-        self.ccr = CCRService()
+        self.ccr = CCRService(config=self.config)
         self.dflash = DFlashService(
             backend=self.backend,
             log_file=self.config.get("dflash_log", "dflash_server.log"),
         )
         self.headroom = HeadroomService(
+            host=self.config.get("local_host", "127.0.0.1"),
+            port=int(self.config.get("headroom_port", 8789)),
+            upstream_url=self.config.get("inference_base_url", f"http://{DEFAULT_CONFIG['local_host']}:{DEFAULT_CONFIG['inference_port']}"),
             log_file=self.config.get("headroom_log", "headroom.log"),
             traffic_log=self.config.get("headroom_traffic_log", "headroom_traffic.jsonl"),
         )

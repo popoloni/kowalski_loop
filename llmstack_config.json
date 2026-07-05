@@ -1,34 +1,47 @@
 {
-  "dev_root": "./prj/space_invaders_clone",
-  "plan_file": "./prj/space_invaders_clone/.claude/plans/my_plan.json",
+  "dev_root": "./prj/pacman256_clone",
+  "plan_file": "./prj/pacman256_clone/.claude/plans/my_plan.json",
+
+  "local_host": "127.0.0.1",
+  "inference_port": 8787,
+  "headroom_port": 8789,
+
   "log_dir": "./logs",
   "dflash_log": "./logs/dflash_server.log",
   "headroom_log": "./logs/headroom.log",
   "headroom_traffic_log": "./logs/headroom_traffic.jsonl",
   "timings_csv": "./logs/dflash_timings.csv",
+  "debug_log": "./logs/kowalski_debug.log",
+  "debug_max_chars": 0,
+
   "permission_mode": "acceptEdits",
   "max_turns": 250,
   "timeout_seconds": 3600,
   "warmup_timeout_seconds": 120,
-  "backend_stability_profile": "stable",
-  "backend_stability_overrides": {},
+
+  "max_retries": 3,
+  "max_resumes": 8,
+  "agent_format_retries": 2,
+  "allow_already_done_if_verified": true,
+  "size_threshold_bytes": 12000,
+
+  "agent_tools": [
+    "Read",
+    "Edit"
+  ],
+
+  "backend_stability_profile": "balanced",
+  "backend_stability_overrides": {
+    "max_tokens": 12288,
+    "max_snapshot_tokens": 32000
+  },
   "dflash_stability_profile": null,
   "dflash_stability_overrides": {},
   "mlx_stability_profile": null,
   "mlx_stability_overrides": {},
   "turboquant_stability_profile": null,
   "turboquant_stability_overrides": {},
-  "max_retries": 3,
-  "max_resumes": 8,
-  "agent_format_retries": 2,
-  "allow_already_done_if_verified": true,
-  "size_threshold_bytes": 12000,
-  "debug_log": "./logs/kowalski_debug.log",
-  "debug_max_chars": 0,
-  "agent_tools": [
-    "Read",
-    "Edit"
-  ],
+
   "active_model": "dflash-qwen35b-moe",
   "models": {
     "dflash-qwen27b-dense": {
@@ -59,7 +72,7 @@
       },
       "cache_max_entries": 64,
       "cache_max_bytes": "12GB",
-      "max_snapshot_tokens": 16000,
+      "max_snapshot_tokens": 32000,
       "ram_required_gb": 56,
       "best_for": "decode",
       "description": "MoE 35B-A3B 4bit with DFlash speculative decoding"

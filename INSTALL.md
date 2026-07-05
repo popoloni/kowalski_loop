@@ -39,16 +39,21 @@ Install base dependencies (once per machine):
 
 ```bash
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-brew install python@3.14 python@3.13 node@20
+brew install python@3.14 python@3.13 node@22 hf
 brew update
-brew reinstall node@20
-brew link --overwrite node@20
+brew reinstall node@22
+brew link --overwrite node@22
 node --version
 ```
 
+`hf` is the Hugging Face CLI used later in this guide. Installing `hf` with Homebrew is the preferred machine-wide path on macOS.
+
 Why two Pythons:
 - `python@3.14` → project virtualenv (`env/`)
-- `python@3.13` → isolated Headroom virtualenv (`~/headroom-env/`); Headroom is not compatible with the 3.14 project venv and must stay isolated.
+- `python@3.13` → isolated Headroom virtualenv (`~/headroom-env/`); keep Headroom isolated from the project env, and prefer 3.13 because its optional savings/dollar-reporting stack is more reliable there than on 3.14.
+
+Why Node 22:
+- the current `@anthropic-ai/claude-code` package documents Node.js 22+.
 
 Install Claude Code and CCR globally:
 
@@ -87,12 +92,20 @@ pip install -e .
 # DFlash backend
 pip install -U dflash-mlx
 
+# MLX backend
+pip install -U mlx-lm transformers
+
 # TurboQuant backend (optional but recommended if you want all three backend options)
 pip install -U turboquant-mlx-full
 
-# HF CLI for model downloads
-test -x "$(command -v hf)" || pip install -U "huggingface_hub[cli]"
+# HF CLI fallback for model downloads if Homebrew's `hf` is not installed
+test -x "$(command -v hf)" || pip install -U huggingface_hub
 ```
+
+Notes:
+- `mlx-lm` is the runtime used by `mlx` model entries (for example `mlx-gemma4-12b`).
+- `transformers` is kept explicit here because MLX runtime/model loading depends on it and the workspace update flow already refreshes it together with `mlx-lm`.
+- `pip install -U huggingface_hub` also provides the `hf` CLI, so sections 3 and 5 work with either install path.
 
 Apply the compatibility patch used by this workspace:
 
@@ -106,10 +119,11 @@ python bin/patch_dflash_mlx.py
 
 Headroom runs from its own Python 3.13 virtualenv, separate from the project env.
 The pip package name is `headroom-ai` (it exposes the `headroom` executable) — `pip install headroom` is the wrong package.
+The official full-featured install is `headroom-ai[all]`.
 
 ```bash
 test -d ~/headroom-env || python3.13 -m venv ~/headroom-env
-~/headroom-env/bin/pip install -U pip headroom-ai
+~/headroom-env/bin/pip install -U pip "headroom-ai[all]"
 ~/headroom-env/bin/headroom --version
 ```
 
@@ -127,9 +141,9 @@ bash bin/update_stack.bash
 
 What this script refreshes:
 - global npm tools (`@anthropic-ai/claude-code`, `@musistudio/claude-code-router`)
-- workspace Python packages (`dflash-mlx`, `turboquant-mlx-full`, `mlx-lm`, `transformers`, `rich`, `psutil`, `httpx`, `huggingface_hub[cli]`)
+- workspace Python packages (`dflash-mlx`, `turboquant-mlx-full`, `mlx-lm`, `transformers`, `rich`, `psutil`, `httpx`, `huggingface_hub`)
 - local DFlash compatibility patch (`bin/patch_dflash_mlx.py`)
-- Headroom environment (`headroom-ai` in `~/headroom-env/`)
+- Headroom environment (`headroom-ai[all]` in `~/headroom-env/`)
 - router restart (`ccr restart`)
 
 Note: the real (non dry-run) run restarts the CCR router daemon. Run `--dry-run` first, and avoid the real run while an interactive/autonomous session is in progress.

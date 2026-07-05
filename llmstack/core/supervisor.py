@@ -24,10 +24,33 @@ class Supervisor:
                                  health_url=self.services.backend.health_url(),
                                  model_name=self.services.active_model_name,
                                  model_target=self.services.backend.model_target(),
-                                 direct_url=self.services.backend.chat_url())
+                                 direct_url=self.config.get("headroom_chat_url"))
 
     def ensure_git(self):
         self.git.ensure_git()
+
+    def _should_promote_direct_to_agent(self, task, outcome):
+        if outcome == "TIMEOUT":
+            # Direct timeouts after continuation rounds rarely recover by retrying direct.
+            return True
+        if outcome != "VERIFY_FAILED":
+            return False
+        feedback = str(task.get("_verify_feedback") or "").lower()
+        if not feedback:
+            return False
+        # Structural failures are unlikely to improve with repeated direct generation.
+        escalation_markers = [
+            "syntaxerror",
+            "invalid syntax",
+            "was never closed",
+            "expected '('",
+            "expected an indented block",
+            "degenerate",
+            "corrupted",
+            "repeated",
+            "filler text",
+        ]
+        return any(marker in feedback for marker in escalation_markers)
 
     def load_plan(self):
         plan_file = self.config["plan_file"]
@@ -99,6 +122,12 @@ class Supervisor:
                 hard_fails = result["hard_fails"]
                 resumes = result["resumes"]
                 done = result["done"]
+
+                if (not done
+                        and executor_type == "direct"
+                        and self._should_promote_direct_to_agent(task, outcome)):
+                    executor_type = "agent"
+                    print("🔀 [Kowalski] Direct failed structurally — switching to agent for next retry.")
 
             if not done:
                 mode.on_incomplete(task, executor_type)

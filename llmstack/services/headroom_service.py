@@ -5,6 +5,8 @@ import subprocess
 import time
 import urllib.request
 
+from llmstack.config import DEFAULT_CONFIG
+
 from .manager import ServiceManager
 
 
@@ -12,13 +14,15 @@ class HeadroomService(ServiceManager):
     def __init__(
         self,
         headroom_executable=None,
-        port=8789,
-        upstream_url="http://127.0.0.1:8787",
+        host=DEFAULT_CONFIG["local_host"],
+        port=DEFAULT_CONFIG["headroom_port"],
+        upstream_url=f"http://{DEFAULT_CONFIG['local_host']}:{DEFAULT_CONFIG['inference_port']}",
         log_file="headroom.log",
         traffic_log="headroom_traffic.jsonl",
     ):
         super().__init__("headroom")
         self.headroom_executable = headroom_executable or os.path.expanduser("~/headroom-env/bin/headroom")
+        self.host = host
         self.port = port
         self.upstream_url = upstream_url
         self.log_file = log_file
@@ -27,7 +31,7 @@ class HeadroomService(ServiceManager):
         self._stop = False
 
     def _health_url(self):
-        return f"http://127.0.0.1:{self.port}/health"
+        return f"http://{self.host}:{self.port}/health"
 
     def _ping(self, timeout=3):
         try:
@@ -118,14 +122,16 @@ def main():
     parser.add_argument("command", nargs="?", default="start", choices=["start", "restart", "stop", "health"])
     parser.add_argument("--executable", default=None,
                         help="Path to the headroom executable (default: ~/headroom-env/bin/headroom)")
-    parser.add_argument("--port", type=int, default=8789)
-    parser.add_argument("--upstream", default="http://127.0.0.1:8787")
+    parser.add_argument("--host", default=DEFAULT_CONFIG["local_host"])
+    parser.add_argument("--port", type=int, default=DEFAULT_CONFIG["headroom_port"])
+    parser.add_argument("--upstream", default=f"http://{DEFAULT_CONFIG['local_host']}:{DEFAULT_CONFIG['inference_port']}")
     parser.add_argument("--log-file", default="headroom.log")
     parser.add_argument("--traffic-log", default="headroom_traffic.jsonl")
     args = parser.parse_args()
 
     service = HeadroomService(
         headroom_executable=args.executable,
+        host=args.host,
         port=args.port,
         upstream_url=args.upstream,
         log_file=args.log_file,

@@ -4,10 +4,12 @@ Requires dflash running on :8787.  Usage: python -m llmstack.tools.build_plan "y
 """
 import json, os, sys, urllib.request
 
-CONFIG    = json.load(open("llmstack_config.json")) if os.path.exists("llmstack_config.json") else {}
+from llmstack.config import DEFAULT_CONFIG, apply_runtime_network_defaults
+
+CONFIG    = apply_runtime_network_defaults(json.load(open("llmstack_config.json")) if os.path.exists("llmstack_config.json") else dict(DEFAULT_CONFIG))
 DEV_ROOT  = os.path.abspath(CONFIG.get("dev_root", "."))
 PLAN_FILE = CONFIG.get("plan_file", "plan.json")
-DIRECT_URL = "http://127.0.0.1:8787/v1/chat/completions"
+DIRECT_URL = CONFIG["inference_chat_url"]
 MODEL = "mlx-community/Qwen3.6-27B-4bit"
 
 DECOMP_SYS = (

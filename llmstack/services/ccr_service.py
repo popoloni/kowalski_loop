@@ -3,13 +3,16 @@ import json
 import os
 import subprocess
 
+from llmstack.config import DEFAULT_CONFIG
+
 from .manager import ServiceManager
 
 
 class CCRService(ServiceManager):
-    def __init__(self, config_path=None):
+    def __init__(self, config_path=None, config=None):
         super().__init__("ccr")
         self.config_path = config_path or os.path.expanduser("~/.claude-code-router/config.json")
+        self.config = config or {}
 
     @staticmethod
     def _router_keys():
@@ -74,6 +77,8 @@ class CCRService(ServiceManager):
     def render(self, registry, active_model, timeout_ms=3600000, backend=None):
         """Render a multi-model CCR config from llmstack model registry data."""
         base = self._load_config()
+        headroom_chat_url = self.config.get("headroom_chat_url", f"http://{DEFAULT_CONFIG['local_host']}:{DEFAULT_CONFIG['headroom_port']}/v1/chat/completions")
+        local_host = self.config.get("local_host", "127.0.0.1")
         model_name, active_provider, active_target = self._resolve_active_pair(registry, active_model)
 
         if backend is not None:
@@ -106,7 +111,7 @@ class CCRService(ServiceManager):
                 provider_max_tokens = int(model_cfgs[0].get("max_tokens", 8192))
             provider_cfg = {
                 "name": provider_name,
-                "api_base_url": existing.get("api_base_url", "http://127.0.0.1:8789/v1/chat/completions"),
+                "api_base_url": existing.get("api_base_url", headroom_chat_url),
                 "api_key": existing.get("api_key", "dflash-local"),
                 "timeout": timeout_ms,
                 "models": provider_models[provider_name],
@@ -116,7 +121,7 @@ class CCRService(ServiceManager):
                 ),
             }
             # Enforce local Headroom route for every provider.
-            provider_cfg["api_base_url"] = "http://127.0.0.1:8789/v1/chat/completions"
+            provider_cfg["api_base_url"] = headroom_chat_url
             providers.append(provider_cfg)
 
         route_target = f"{active_provider},{active_target}"
@@ -127,7 +132,7 @@ class CCRService(ServiceManager):
 
         rendered = {
             "LOG": base.get("LOG", True),
-            "HOST": base.get("HOST", "127.0.0.1"),
+            "HOST": base.get("HOST", local_host),
             "NON_INTERACTIVE_MODE": base.get("NON_INTERACTIVE_MODE", True),
             "API_TIMEOUT_MS": timeout_ms,
             "Providers": providers,
@@ -154,6 +159,7 @@ class CCRService(ServiceManager):
     def validate_multi_model_config(self, registry, active_model):
         issues = []
         cfg = self._load_config()
+        expected_api_base = self.config.get("headroom_chat_url", f"http://{DEFAULT_CONFIG['local_host']}:{DEFAULT_CONFIG['headroom_port']}/v1/chat/completions")
 
         try:
             _, active_provider, active_target = self._resolve_active_pair(registry, active_model)
@@ -172,9 +178,9 @@ class CCRService(ServiceManager):
                 continue
             provider_models[name] = set(p.get("models") or [])
             api_base = str(p.get("api_base_url") or "")
-            if "127.0.0.1:8789" not in api_base:
+            if api_base != expected_api_base:
                 issues.append(
-                    f"Provider '{name}' api_base_url must point to :8789 (found '{api_base}')"
+                    f"Provider '{name}' api_base_url must be '{expected_api_base}' (found '{api_base}')"
                 )
 
         for model_name, model_cfg in registry.items():

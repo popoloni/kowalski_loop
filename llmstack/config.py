@@ -33,6 +33,9 @@ LEGACY_PERMISSION_MODE_ALIASES = {
 }
 
 DEFAULT_CONFIG = {
+    "local_host": "127.0.0.1",
+    "inference_port": 8787,
+    "headroom_port": 8789,
     "dev_root": ".",
     "plan_file": "plan.json",
     "loop_mode": "plan",
@@ -73,6 +76,29 @@ DEFAULT_CONFIG = {
     "verification_plugins": {},
     "thinking_mode": "off",
 }
+
+
+def _http_base_url(host, port):
+    return f"http://{host}:{int(port)}"
+
+
+def apply_runtime_network_defaults(cfg):
+    host = str(cfg.get("local_host", DEFAULT_CONFIG["local_host"]) or DEFAULT_CONFIG["local_host"]).strip()
+    inference_port = int(cfg.get("inference_port", DEFAULT_CONFIG["inference_port"]))
+    headroom_port = int(cfg.get("headroom_port", DEFAULT_CONFIG["headroom_port"]))
+
+    cfg["local_host"] = host
+    cfg["inference_port"] = inference_port
+    cfg["headroom_port"] = headroom_port
+
+    cfg["inference_base_url"] = _http_base_url(host, inference_port)
+    cfg["inference_health_url"] = cfg["inference_base_url"] + "/v1/models"
+    cfg["inference_chat_url"] = cfg["inference_base_url"] + "/v1/chat/completions"
+
+    cfg["headroom_base_url"] = _http_base_url(host, headroom_port)
+    cfg["headroom_health_url"] = cfg["headroom_base_url"] + "/health"
+    cfg["headroom_chat_url"] = cfg["headroom_base_url"] + "/v1/chat/completions"
+    return cfg
 
 
 def _normalize_string_list(value, label):
@@ -174,6 +200,8 @@ def load_config(config_path="llmstack_config.json"):
         print(f"🔧 [Kowalski] Config loaded: Root='{cfg['dev_root']}', Plan='{cfg['plan_file']}'")
     else:
         print("⚠️ [Kowalski] No llmstack_config.json found, using defaults.")
+
+    apply_runtime_network_defaults(cfg)
 
     cfg["log_dir"] = _abs_path(base_dir, cfg.get("log_dir", "logs"))
     os.makedirs(cfg["log_dir"], exist_ok=True)

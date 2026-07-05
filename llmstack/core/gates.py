@@ -8,6 +8,20 @@ def changed_files(git_manager):
     return git_manager.changed_files()
 
 
+def _target_present_in_changed(target, changed):
+    if target in changed:
+        return True
+    norm_target = target.rstrip("/")
+    for path in changed:
+        norm_path = path.rstrip("/")
+        if not norm_path:
+            continue
+        # Accept both "target under changed dir" and "changed file under target dir".
+        if norm_target.startswith(norm_path + "/") or norm_path.startswith(norm_target + "/"):
+            return True
+    return False
+
+
 def check_wiring(dev_root):
     idx = os.path.join(dev_root, "index.html")
     if not os.path.exists(idx):
@@ -200,7 +214,7 @@ def _run_gate_spec(spec, task, dev_root, git_manager):
             print("❌ [Kowalski] No file changes detected — task was a no-op.")
             return False, "no_change", "No file changes detected during verification.", True
         target = spec.get("target")
-        if target and target not in changed:
+        if target and not _target_present_in_changed(target, changed):
             print(f"❌ [Kowalski] Declared file '{target}' was NOT modified. Changed: {sorted(changed)}")
             return False, "target_not_changed", f"Declared file '{target}' was not modified. Changed: {sorted(changed)}", True
         print(f"📈 [Kowalski] Changed files: {sorted(changed)}")

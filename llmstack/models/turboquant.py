@@ -60,6 +60,6 @@ class TurboQuantBackend(InferenceBackend):
             "--kv-v-bits", str(s["kv_v_bits"]),
             "--kv-min-tokens", str(s["kv_min_tokens"]),
             "--prompt-concurrency", str(s["prompt_concurrency"]),
-            "--host", "127.0.0.1", "--port", "8787",
+            "--host", self.serve_host(), "--port", str(self.serve_port()),
             "--chat-template-args", self._chat_template_args(c),
         ]
