@@ -29,3 +29,6 @@ __pycache__/
 
 # Local automation scripts (not versioned)
 .local/
+
+# Local exported article PDF
+docs/Editing The Kowalski Loop: Turning a Local Model into a Verified Coding System – Medium.pdf
