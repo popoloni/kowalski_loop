@@ -219,6 +219,12 @@ When to prefer Qwen3.6-27B-4bit:
 1. You need a conservative fallback path for compatibility checks or regression baselines.
 2. You are running controlled experiments where architectural simplicity is preferred over best observed latency.
 
+Coding-quality disclaimer:
+
+1. In qualitative coding sessions, Qwen3.6-27B-4bit sometimes appears more consistent on the first attempt (for example, fewer re-prompts or rewrites needed).
+2. This observation is currently anecdotal and not yet supported by quantitative coding-quality benchmarks.
+3. No pass@k, unit-test pass-rate, or task-level acceptance benchmark was run in this report, so no conclusive coding-quality ranking is claimed.
+
 Suggested usage policy:
 
 1. Route normal coding-agent and long-context iterative sessions to 35B-A3B.

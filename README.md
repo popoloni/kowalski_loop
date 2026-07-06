@@ -158,6 +158,8 @@ If you only want the current conclusions, start here.
 
 The short executive summary is simple: use the larger Qwen3.6-35B-A3B model for the default interactive workload, keep Qwen3.6-27B as a conservative fallback/baseline, rely on Headroom and DFlash when prompts and sessions become large, and watch memory carefully because the real failure mode is sustained growth toward the practical GPU ceiling.
 
+Coding-quality disclaimer: in qualitative coding sessions, Qwen3.6-27B may feel more consistent on first-try responses, but this has not yet been validated with quantitative coding benchmarks (for example pass@k or test-pass-rate). Treat this as an operational impression, not a conclusive measurement.
+
 ---
 
 ## Operating the Stack
