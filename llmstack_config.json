@@ -42,9 +42,9 @@
   "turboquant_stability_profile": null,
   "turboquant_stability_overrides": {},
 
-  "active_model": "dflash-qwen35b-moe",
+  "active_model": "dflash-qwen27b-dense",
   "models": {
-    "dflash-qwen27b-dense": {
+    "dflash-qwen35b-moe": {
       "type": "dflash",
       "target": "mlx-community/Qwen3.6-27B-4bit",
       "draft": "z-lab/Qwen3.6-27B-DFlash",
@@ -56,7 +56,7 @@
       },
       "cache_max_entries": 64,
       "cache_max_bytes": "12GB",
-      "max_snapshot_tokens": 16000,
+      "max_snapshot_tokens": 32000,
       "ram_required_gb": 48,
       "description": "Dense 27B with DFlash speculative decoding"
     },

@@ -11,12 +11,21 @@ the valid range. For this report, I use only the clean dflash rows where `0 <= c
 
 Clean sample used here:
 
+```bash
+cd ~/local-llm-workspace
+env/bin/python llmstack/tools/dflash_metrics.py --update-dflash-md
+```
+
+<!-- DFLASH_CORE_TABLE_START -->
+
 | Metric | Value |
 |---|---:|
 | dflash rows in CSV | 3,369 |
 | clean dflash rows | 3,364 |
 | parser outliers removed | 5 |
 | sessions | 23 |
+
+<!-- DFLASH_CORE_TABLE_END -->
 
 ---
 
@@ -40,6 +49,8 @@ That is the part that still needs prefill work. The rest is reused.
 
 From the clean dflash sample:
 
+<!-- DFLASH_LOGS_TABLE_START -->
+
 | Metric | Value |
 |---|---:|
 | Cache-hit median | 99.50% |
@@ -51,6 +62,8 @@ From the clean dflash sample:
 | Prefill <= 5 s | 63.0% |
 | Requests with >= 95% cache | 76.5% |
 | Requests with >= 99% cache | 59.5% |
+
+<!-- DFLASH_LOGS_TABLE_END -->
 
 That already tells the main truth:
 
@@ -87,10 +100,16 @@ What happened in aggregate:
 
 What the numbers tell us:
 
-- 80-90% cache: median prefill 60.95 s.
-- 90-95% cache: median prefill 28.30 s.
-- 95-99% cache: median prefill 8.20 s.
-- 99-100% cache: median prefill 1.20 s.
+<!-- DFLASH_CACHE_BAND_BLOCK_START -->
+
+```text
+80-90%   n= 211 median_prefill= 62.10s
+90-95%   n= 112 median_prefill= 30.30s
+95-99%   n= 572 median_prefill=  8.40s
+99-100%  n=2001 median_prefill=  1.20s
+```
+
+<!-- DFLASH_CACHE_BAND_BLOCK_END -->
 
 So the true threshold for “fast” is not 80-90% reuse. It is much closer to 95-99%, with
 99%+ being the clearest fast path.
@@ -109,12 +128,18 @@ What happened in aggregate:
 
 What the numbers tell us:
 
-- <= 100 uncached tokens: about 1.1 s median prefill.
-- 100-500 uncached tokens: about 3.7 s median prefill.
-- 500-1000 uncached tokens: about 9.6 s median prefill.
-- 1000-5000 uncached tokens: about 20.3 s median prefill.
-- 5000-10000 uncached tokens: about 71.4 s median prefill.
-- 10000-20000 uncached tokens: about 152.4 s median prefill.
+<!-- DFLASH_UNCACHED_BAND_BLOCK_START -->
+
+```text
+<= 100    n=1614 median_prefill=  0.80s
+<= 500    n= 600 median_prefill=  3.65s
+<= 1000   n= 249 median_prefill=  9.60s
+<= 5000   n= 425 median_prefill= 20.30s
+<= 10000  n= 266 median_prefill= 71.35s
+<= 20000  n= 104 median_prefill=152.35s
+```
+
+<!-- DFLASH_UNCACHED_BAND_BLOCK_END -->
 
 This is the clearest model in the whole dataset: prefill time tracks the uncached suffix,
 not just the nominal cache-hit percentage.
@@ -221,16 +246,22 @@ if 5000+:                     slow again
 
 ### Target comparison note
 
-The two main dflash targets behave differently in absolute median latency, but the same cache
-curve applies to both.
+The model split is useful for diagnostics, but should not be read as an intrinsic speed ranking.
+Different targets often run under different workload mixes and scaffold reuse patterns.
 
-| Target | Rows | Median prefill |
-|---|---:|---:|
-| Qwen3.6-27B-4bit | 2,094 | 3.6 s |
-| Qwen3.6-35B-A3B-4bit | 1,079 | 1.1 s |
+<!-- DFLASH_MODEL_TABLE_START -->
 
-That difference is mostly a workload-mix effect, not proof that one model is intrinsically
-faster in the abstract. The real driver is still how much of the prompt is reused.
+| Target | Rows | Median prefill | p90 prefill | Median cache hit | Share >=99% cache |
+|---|---:|---:|---:|---:|---:|
+| `mlx-community/Qwen3.6-27B-4bit` | 2,094 | 3.60 s | 88.47 s | 99.50% | 57.7% |
+| `mlx-community/Qwen3.6-35B-A3B-4bit` | 1,079 | 1.10 s | 16.72 s | 99.60% | 64.7% |
+| `mlx-community/gemma-4-12B-4bit` | 113 | 2.10 s | 13.98 s | 99.50% | 65.5% |
+
+<!-- DFLASH_MODEL_TABLE_END -->
+
+This confirms that per-target medians differ in practice, but the same nonlinear cache-threshold
+behavior still holds. The real driver remains how much of the prefix is reused and how large the
+uncached suffix is.
 
 ---
 

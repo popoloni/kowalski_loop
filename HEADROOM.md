@@ -4,7 +4,7 @@ This document explains when Headroom is effective, when it is not, and why the s
 increase sharply in long agentic sessions. The analysis uses real telemetry from
 `logs/headroom_traffic.jsonl` and the same session-splitting rule used by the timing charts.
 
-All numbers below come from 3,093 recorded Headroom requests across 24 work sessions.
+All numbers below come from 3,146 recorded Headroom requests across 24 work sessions.
 The data spans 2026-06-21 → 2026-07-05 and reflects the current local stack behavior.
 
 ---
@@ -32,20 +32,29 @@ or save a lot but still cost time if the upstream request is large.
 
 From `logs/headroom_traffic.jsonl`:
 
+```bash
+cd ~/local-llm-workspace
+env/bin/python llmstack/tools/headroom_metrics.py --update-headroom-md
+```
+
+<!-- HEADROOM_CORE_TABLE_START -->
+
 | Metric | Value |
 |---|---:|
-| Requests | 3,093 |
+| Requests | 3,146 |
 | Sessions | 24 |
-| Total original tokens | 153,154,114 |
-| Total tokens saved | 17,841,532 |
-| Weighted savings | 11.65% |
-| Overall reduction after optimization | 11.44% |
+| Total original tokens | 158,977,848 |
+| Total tokens saved | 18,436,841 |
+| Weighted savings | 11.60% |
+| Tokens retained after optimization | 88.40% |
 | Mean savings per request | 6.76% |
 | Median savings per request | 4.39% |
-| 90th percentile savings | 14.65% |
+| 90th percentile savings | 14.87% |
 | Max savings | 49.32% |
-| Zero-savings share | 39.6% |
-| Requests at 20%+ savings | 7.2% |
+| Zero-savings share | 39.3% |
+| Requests at 20%+ savings | 7.1% |
+
+<!-- HEADROOM_CORE_TABLE_END -->
 
 The distribution is skewed. Headroom is not uniformly beneficial; it is sharply beneficial in
 the right conditions.
@@ -91,7 +100,7 @@ What the numbers tell us:
 
 - First 3 turns: mean savings 1.81%, median 0.0%.
 - First 10 turns: mean savings 2.27%, median 0.0%.
-- 11+ turns: mean savings 7.10%, median 5.08%.
+- 11+ turns: mean savings 7.10%, median 5.09%.
 - The effect is real, but it is weaker than prompt size alone.
 
 ### 2.3 Savings distribution
@@ -106,7 +115,7 @@ What happened in aggregate:
 
 What the numbers tell us:
 
-- 39.6% of requests are zero-savings requests.
+- 39.3% of requests are zero-savings requests.
 - The useful tail begins around 20% savings.
 - The tail is the reason the weighted savings is still meaningful even though the median is modest.
 
@@ -170,25 +179,58 @@ The data fits a threshold model better than a pure linear model.
 
 ### Piecewise model
 
+<!-- HEADROOM_PIECEWISE_START -->
+
 ```text
-if prompt_tokens < 10k: savings_percent ≈ 0-2%
-if 10k-30k:            savings_percent ≈ 1-4%
-if 30k-40k:            savings_percent ≈ 5-6%
-if 40k-60k:            savings_percent ≈ 8-9%
-if 60k+:               20%+ becomes plausible in late sessions
+0k-10k    n= 177 median= 0.00% mean= 0.12% share>=20%= 0.0%
+10k-30k   n= 973 median= 0.00% mean= 1.06% share>=20%= 0.5%
+30k-40k   n= 553 median= 5.17% mean= 5.80% share>=20%= 4.3%
+40k-60k   n= 661 median= 7.64% mean= 8.49% share>=20%= 4.8%
+60k+      n= 782 median=11.60% mean=14.58% share>=20%=20.7%
 ```
+
+<!-- HEADROOM_PIECEWISE_END -->
 
 ### Coarse regression model
 
+<!-- HEADROOM_REGRESSION_START -->
+
 ```text
-savings_percent ≈ -26.75 + 7.71*log10(prompt_tokens)
-                 + 4.35*session_progress
-                 - 3.30*cache_hit
-                 - 2.38*noop
+savings_percent ≈ -26.91 + 7.75*log10(prompt_tokens)
+                 + 4.02*session_progress
+                 - 3.25*cache_hit
+                 - 2.27*noop
 ```
+
+<!-- HEADROOM_REGRESSION_END -->
 
 This linear model is only a rough guide. Its $R^2$ is about 0.25, so it is useful for
 direction, not for precise forecasting. The piecewise model above is more actionable.
+
+### 3.1 Per-model split: useful, but not causal
+
+Adding model-level slicing is useful for diagnostics, but it should not be interpreted as
+"model causes Headroom efficiency". Headroom savings is driven primarily by context redundancy,
+agent/direct traffic mix, and session shape.
+
+Current split (models with meaningful sample size):
+
+<!-- HEADROOM_MODEL_TABLE_START -->
+
+| Model | n | Mean savings | Median savings | p90 savings | Share >=20% |
+|---|---:|---:|---:|---:|---:|
+| `mlx-community/Qwen3.6-27B-4bit` | 1,665 | 6.70% | 5.55% | 11.58% | 5.9% |
+| `mlx-community/Qwen3.6-35B-A3B-4bit` | 1,428 | 7.09% | 0.42% | 17.02% | 8.7% |
+
+<!-- HEADROOM_MODEL_TABLE_END -->
+
+How to read this:
+
+1. 35B-A3B shows a lower median but a stronger high-savings tail, which suggests a more polarized
+   traffic mix (many near-zero turns plus a subset of highly compressible turns).
+2. 27B shows a higher center (median), indicating more consistently moderate compression.
+3. These are workload-level observations, not an intrinsic model ranking. To isolate model effects,
+   controlled A/B runs with identical prompts and mode mix are required.
 
 ### Interpretation
 

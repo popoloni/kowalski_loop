@@ -141,7 +141,22 @@ To monitor real-time metrics, run `bin/launch_dashboard.bash` or `python -m llms
 6. [HEADROOM.md](HEADROOM.md) — context compression efficiency, savings thresholds, and session-scale analysis.
 7. [DFLASH.md](DFLASH.md) — speculative decoding efficiency, cache thresholds, and prefill gain analysis.
 8. [SAVINGS.md](SAVINGS.md) — cross-layer synthesis of memory pressure, prompt compression, and cache reuse.
-9. Advanced references — [Kowalski Configuration](#advanced-reference-kowalski-configuration-llmstack_configjson), [Task Schema](#advanced-reference-task-schema-plan-json), [Executor Selection](#advanced-reference-executor-selection), [Loop Modes](#loop-modes).
+9. [LLM_COMPARISON.md](LLM_COMPARISON.md) — Qwen-only A/B comparison, throughput, and crash-risk analysis.
+10. Advanced references — [Kowalski Configuration](#advanced-reference-kowalski-configuration-llmstack_configjson), [Task Schema](#advanced-reference-task-schema-plan-json), [Executor Selection](#advanced-reference-executor-selection), [Loop Modes](#loop-modes).
+
+### Analysis recap
+
+If you only want the current conclusions, start here.
+
+| Report | Scope | Principal result |
+|---|---|---|
+| [MEMORY.md](MEMORY.md) | GPU memory pressure, crash signature, and RAM sizing | Crashes appear around the 52 GB practical ceiling; 35B-A3B is workable with monitoring, not automatically unsafe. |
+| [HEADROOM.md](HEADROOM.md) | Prompt compression and context savings | Savings are modest early, but become useful once prompts grow past roughly 30k tokens and 11+ turns. |
+| [DFLASH.md](DFLASH.md) | Cache reuse and prefill speed | The real fast path is 95-99%+ cache reuse; 99%+ is the clearest low-latency regime. |
+| [SAVINGS.md](SAVINGS.md) | Cross-layer synthesis of memory, headroom, and DFlash | Prompt reduction, cache reuse, and memory headroom work together, but they pay off at different stages. |
+| [LLM_COMPARISON.md](LLM_COMPARISON.md) | Qwen A/B, throughput, and crash-risk modeling | Qwen3.6-35B-A3B is better on matched latency, memory, and throughput; the crash-risk model is still only a directional warning signal. |
+
+The short executive summary is simple: use the larger Qwen3.6-35B-A3B model for the default interactive workload, keep Qwen3.6-27B as a conservative fallback/baseline, rely on Headroom and DFlash when prompts and sessions become large, and watch memory carefully because the real failure mode is sustained growth toward the practical GPU ceiling.
 
 ---
 

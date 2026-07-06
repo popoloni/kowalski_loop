@@ -78,8 +78,26 @@ Runtime evidence from `logs/dflash_timings.csv` (grouped by `served_target`) sho
 - `mlx-community/Qwen3.6-27B-4bit`: n=2097, median `mlx_peak_gb`=42.78, p95=49.23, max=54.89
 - `mlx-community/Qwen3.6-35B-A3B-4bit`: n=1080, median `mlx_peak_gb`=34.94, p95=47.98, max=51.29
 
-These runtime numbers do **not** imply lighter 27B weights; they reflect different prompt
-lengths, cache-hit patterns, and session trajectories.
+These runtime numbers do **not** imply lighter 27B weights. They are observational telemetry
+from heterogeneous sessions and should not be read as an intrinsic model-memory ordering.
+
+Cross-checks on the same dataset show why this can look counterintuitive:
+
+1. Prompt distribution is not identical across models:
+  - 27B: prompt median/p90 = 32,804 / 52,278 tokens
+  - 35B-A3B: prompt median/p90 = 29,616 / 105,027 tokens
+2. Even with prompt binning, 27B still sits higher in this workload:
+  - 10k-20k: median `mlx_peak_gb` 38.96 (27B) vs 33.20 (35B-A3B)
+  - 20k-40k: 41.81 vs 33.20
+  - 40k-80k: 44.96 vs 35.75
+3. Cache slices also differ by model behavior:
+  - cache >=99%: median `mlx_peak_gb` 43.23 (27B) vs 33.41 (35B-A3B)
+  - cache <95%: 41.81 vs 40.14
+
+Interpretation: total parameter size and runtime peak are related but not equivalent. Runtime
+peak is shaped by prompt trajectory, cache state, allocator/runtime behavior, and session history.
+For strict model-vs-model attribution, controlled A/B runs with identical prompts and profile
+settings are required.
 
 Useful formulas:
 
@@ -207,7 +225,7 @@ memory. Applying the same heuristic with a safety margin (target ≤ **65–70 %
 | 24 GB | ~17–19 GB | ≤ 14–15 GB | 12B comfortable, 27B not advised |
 | 36 GB | ~26–29 GB | ≤ 22–24 GB | 27B with care |
 | 48 GB | ~35–38 GB | ≤ 30–32 GB | 27B comfortable, 35B-A3B with care |
-| 64 GB | ~52 GB (observed) | ≤ 44–46 GB | 35B-A3B comfortable |
+| 64 GB | ~52 GB (observed) | ≤ 44–46 GB | 35B-A3B workable with monitoring |
 
 ### 3.1 Quick decision table (quality vs stability)
 
