@@ -1,6 +1,6 @@
 {
-  "dev_root": "./prj/pacman256_clone",
-  "plan_file": "./prj/pacman256_clone/.claude/plans/my_plan.json",
+  "dev_root": "./prj/pacman256_mvp_clone",
+  "plan_file": "/Users/enricopapalini/.claude/plans/pacman-fixes-v2.json",
 
   "local_host": "127.0.0.1",
   "inference_port": 8787,
@@ -41,10 +41,9 @@
   "mlx_stability_overrides": {},
   "turboquant_stability_profile": null,
   "turboquant_stability_overrides": {},
-
-  "active_model": "dflash-qwen27b-dense",
+  "active_model": "dflash-ornith35b-moe",
   "models": {
-    "dflash-qwen35b-moe": {
+    "dflash-qwen27b-dense": {
       "type": "dflash",
       "target": "mlx-community/Qwen3.6-27B-4bit",
       "draft": "z-lab/Qwen3.6-27B-DFlash",
@@ -59,6 +58,22 @@
       "max_snapshot_tokens": 32000,
       "ram_required_gb": 48,
       "description": "Dense 27B with DFlash speculative decoding"
+    },
+    "dflash-ornith35b-moe": {
+      "type": "dflash",
+      "target": "mlx-community/Ornith-1.0-35B-4bit",
+      "draft": "z-lab/Qwen3.6-35B-A3B-DFlash",
+      "verify_mode": "adaptive",
+      "max_tokens": 8192,
+      "temp": 0.2,
+      "chat_template_args": {
+        "enable_thinking": false
+      },
+      "cache_max_entries": 64,
+      "cache_max_bytes": "12GB",
+      "max_snapshot_tokens": 32000,
+      "ram_required_gb": 48,
+      "description": "Ornith-1.0-35B Mix of Experts with DFlash speculative decoding"
     },
     "dflash-qwen35b-moe": {
       "type": "dflash",
@@ -110,6 +125,23 @@
       "ram_required_gb": 8,
       "best_for": "quality",
       "description": "Dense 12B on pure MLX server without DFlash"
+    },
+    "mlx-ornith35b": {
+      "type": "mlx",
+      "target": "mlx-community/Ornith-1.0-35B-4bit",
+      "draft": null,
+      "max_tokens": 8192,
+      "temp": 0.2,
+      "chat_template_args": {
+        "enable_thinking": false
+      },
+      "prompt_concurrency": 1,
+      "prefill_step_size": 4096,
+      "cache_max_entries": 64,
+      "cache_max_bytes": "16GB",
+      "ram_required_gb": 16,
+      "best_for": "quality",
+      "description": "Dense 35B on pure MLX server without DFlash"
     },
     "turboquant-qwen35b-moe": {
       "type": "turboquant",

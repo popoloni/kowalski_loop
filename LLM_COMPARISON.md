@@ -84,10 +84,10 @@ The table below shows the matched difference between Qwen 35B-A3B and Qwen 27B a
 
 | Outcome | Matched effect (35B-A3B - 27B) | 95% CI | Conclusive? |
 |---|---:|---:|---:|
-| prefill_time_s | -26.12 s | [-32.24, -20.97] s | yes |
-| decode_time_s | -15.76 s | [-20.01, -11.62] s | yes |
-| mlx_peak_gb | -4.75 GB | [-5.31, -4.18] GB | yes |
-| Matched pairs | 787 | n/a | n/a |
+| prefill_time_s | -23.30 s | [-27.93, -19.43] s | yes |
+| decode_time_s | -14.47 s | [-17.86, -11.52] s | yes |
+| mlx_peak_gb | -4.62 GB | [-5.11, -4.15] GB | yes |
+| Matched pairs | 1,126 | n/a | n/a |
 
 <!-- LLM_AB_TABLE_END -->
 
@@ -99,10 +99,10 @@ The balance table checks whether the matching step made the two groups comparabl
 
 | Covariate | SMD before matching | SMD after matching |
 |---|---:|---:|
-| log_prompt | 0.020 | 0.019 |
-| cache_hit_pct | -0.007 | 0.041 |
-| log_uncached | 0.177 | 0.190 |
-| session_progress | -0.018 | -0.024 |
+| log_prompt | -0.109 | -0.004 |
+| cache_hit_pct | 0.038 | 0.044 |
+| log_uncached | 0.073 | 0.185 |
+| session_progress | -0.067 | -0.030 |
 
 <!-- LLM_BALANCE_TABLE_END -->
 
@@ -124,14 +124,14 @@ The raw numbers below are useful as a quick sanity check, but they can still be 
 
 | Model | decode_tps median | decode_tps p90 | prefill_real_tps median | prefill_real_tps p90 |
 |---|---:|---:|---:|---:|
-| Qwen3.6-35B-A3B-4bit | 42.2 | 58.7 | 112.4 | 388.8 |
+| Qwen3.6-35B-A3B-4bit | 40.9 | 74.9 | 99.9 | 372.3 |
 | Qwen3.6-27B-4bit | 13.3 | 18.0 | 35.4 | 77.4 |
 
 | Throughput metric | Matched effect (35B-A3B - 27B) | 95% CI | Better when |
 |---|---:|---:|---|
-| decode_tps | 31.52 tokens/s | [30.25, 32.75] tokens/s | higher |
-| prefill_real_tps | 128.58 tokens/s | [120.67, 137.69] tokens/s | higher |
-| Matched pairs | 787 | n/a | n/a |
+| decode_tps | 29.95 tokens/s | [28.90, 30.98] tokens/s | higher |
+| prefill_real_tps | 117.11 tokens/s | [110.81, 123.36] tokens/s | higher |
+| Matched pairs | 1,126 | n/a | n/a |
 
 <!-- LLM_THROUGHPUT_TABLE_END -->
 
@@ -162,23 +162,23 @@ The most important practical use of this chart is thresholding and alerting. It 
 | Item | Value |
 |---|---:|
 | Risk label used | high-risk-proxy(mlx_peak_gb>=48) |
-| Positive events | 205 |
-| Positive prevalence | 6.46% |
-| Temporal split cutoff | 2026-07-05 12:31:01 UTC |
-| Temporal train rows | 2,538 |
-| Temporal test rows | 635 |
-| Temporal train prevalence | 8.04% |
-| Temporal test prevalence | 0.16% |
-| Temporal train AUC | 0.595 |
-| Temporal test AUC | 0.167 |
-| Temporal train Brier | 0.0768 |
-| Temporal test Brier | 0.0136 |
+| Positive events | 233 |
+| Positive prevalence | 6.27% |
+| Temporal split cutoff | 2026-07-05 15:01:28 UTC |
+| Temporal train rows | 2,972 |
+| Temporal test rows | 743 |
+| Temporal train prevalence | 6.86% |
+| Temporal test prevalence | 3.90% |
+| Temporal train AUC | 0.561 |
+| Temporal test AUC | 0.442 |
+| Temporal train Brier | 0.0667 |
+| Temporal test Brier | 0.0409 |
 | Temporal reliability | low (temporal split unstable) |
 | Coef: mlx_peak_gb | 0.034 |
-| Coef: log_prompt | -0.720 |
-| Coef: log_uncached | -0.134 |
+| Coef: log_prompt | -0.728 |
+| Coef: log_uncached | -0.101 |
 | Coef: prefill_tail | -0.002 |
-| Coef: model_is_35 | -0.239 |
+| Coef: model_is_35 | -0.283 |
 
 <!-- LLM_RISK_TABLE_END -->
 

@@ -36,6 +36,7 @@ HEADROOM_TREND_BINS = np.unique(
 DECODE_TREND_BINS = np.logspace(0, 5, 15)
 
 TARGET_COLORS = {
+    "mlx-community/Ornith-1.0-35B-4bit": "#c1121f",
     "mlx-community/Qwen3.6-27B-4bit": "#1f6feb",
     "mlx-community/Qwen3.6-35B-A3B-4bit": "#d97706",
     "mlx-community/gemma-4-12B-4bit": "#10b981",
@@ -455,10 +456,12 @@ def _render_overview(
     fig.savefig(IMG / output_name, dpi=140)
     plt.close(fig)
 
+    memory_ornith = memory_df[memory_df["served_target"] == "mlx-community/Ornith-1.0-35B-4bit"]
     memory_27 = memory_df[memory_df["served_target"] == "mlx-community/Qwen3.6-27B-4bit"]
     memory_35 = memory_df[memory_df["served_target"] == "mlx-community/Qwen3.6-35B-A3B-4bit"]
     memory_gemma = memory_df[memory_df["served_target"] == "mlx-community/gemma-4-12B-4bit"]
     print("Savings charts written to", str(IMG))
+    print("  memory ornith35B:", _stats(memory_ornith["mlx_peak_gb"], " GB"))
     print("  memory 27B      :", _stats(memory_27["mlx_peak_gb"], " GB"))
     print("  memory 35B-A3B  :", _stats(memory_35["mlx_peak_gb"], " GB"))
     print("  memory gemma12B :", _stats(memory_gemma["mlx_peak_gb"], " GB"))

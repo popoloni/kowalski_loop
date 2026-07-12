@@ -14,6 +14,18 @@ The purpose of this article is to answer that question with evidence. It is writ
 
 If you run local agents seriously, this is the layer that separates a cool demo from an operable system.
 
+## Published update (2026-07-12): Ornith-1.0-35B MoE is now included
+
+This article has been updated after publication to include a new production model in the telemetry stack: `mlx-community/Ornith-1.0-35B-4bit` (Mix of Experts).
+
+What changed in this revision:
+
+1. Ornith is now part of the per-model metrics in [SAVINGS.md](../SAVINGS.md), [DFLASH.md](../DFLASH.md), and [HEADROOM.md](../HEADROOM.md).
+2. In the by-model synthesis chart (`img/savings/savings_landscape_by_model.png`), Ornith is rendered as the red trace for immediate visual tracking.
+3. Aggregate metrics were refreshed end-to-end on the expanded dataset, and key values in this article were updated accordingly.
+
+This is a real data update, not a wording-only edit.
+
 ---
 
 ## Before the numbers, a familiar failure mode
@@ -34,7 +46,7 @@ Once you see the system this way, every chart is no longer reporting. It is stee
 
 ## What exactly we measured
 
-The measurement stack spans four layers: memory reliability, Headroom compression, DFlash cache/prefill efficiency, and cross-model comparison between Qwen3.6-27B and Qwen3.6-35B-A3B.
+The measurement stack spans four layers: memory reliability, Headroom compression, DFlash cache/prefill efficiency, and model-level comparison. The Qwen matched A/B remains in place (Qwen3.6-27B vs Qwen3.6-35B-A3B), and Ornith-1.0-35B MoE is now included in per-model contribution analysis.
 
 Telemetry comes primarily from `logs/dflash_timings.csv`, `logs/headroom_traffic.jsonl`, and `logs/dflash_server.log`. The analysis is consolidated in [MEMORY.md](../MEMORY.md), [HEADROOM.md](../HEADROOM.md), [DFLASH.md](../DFLASH.md), [SAVINGS.md](../SAVINGS.md), and [LLM_COMPARISON.md](../LLM_COMPARISON.md).
 
@@ -76,7 +88,7 @@ In plain terms, memory is not just another metric. It is the kill switch.
 
 Headroom is not a uniform accelerator. It is highly effective in some phases and nearly neutral in others.
 
-Current telemetry shows weighted savings around 11.60%, but the median per-request savings is much lower (about 4.39%). This gap is important: it tells us the distribution is skewed. A minority of high-impact turns contributes a large share of total benefit.
+Current telemetry shows weighted savings around 9.74%, but the median per-request savings is much lower (about 4.37%). This gap is important: it tells us the distribution is skewed. A minority of high-impact turns contributes a large share of total benefit.
 
 The qualitative pattern is stable: very small prompts usually save little, while larger and more repetitive sessions create compressible structure that Headroom can exploit.
 
@@ -96,9 +108,23 @@ In this dataset, 80-90% cache hit is better than cold start but often still expe
 
 The key metric behind that behavior is uncached suffix size. Two requests can show similarly high cache percentages and still differ sharply in latency if their uncached tails are different. That is why “cache hit” alone can mislead when interpreted without suffix context.
 
-The aggregate anchors reinforce this: prefill median is around 2.40 s, prefill p90 is about 67.44 s, and the 99-100% cache band concentrates the clear low-latency behavior.
+The aggregate anchors reinforce this: prefill median is around 1.10 s, prefill p90 is about 22.61 s, and the 99-100% cache band concentrates the clear low-latency behavior.
 
 Operationally, this means tuning for "high average cache" is not enough. You need to tune for "small uncached suffix most of the time."
+
+## 3.5) Ornith contribution: where the new model changes the picture
+
+With Ornith now in the production traces, the stack gains a large new evidence block rather than a tiny side sample.
+
+From the refreshed per-model table in [SAVINGS.md](../SAVINGS.md):
+
+1. DFlash rows: 3,300 (largest model slice in the current dataset).
+2. DFlash median prefill: 1.00 s; p90 prefill: 6.00 s.
+3. Share of calls with prefill <= 2 s: 81.2%.
+4. Share of calls with cache hit >= 99%: 84.2%.
+5. Headroom median savings: 4.90%; p90 savings: 13.57%; >=20% savings share: 7.3%.
+
+Interpretation: Ornith materially strengthens the fast-prefill regime and high-cache-reuse share. It does not magically remove decode-length effects, but it shifts more real traffic into the low-latency prefill band.
 
 ## 4) A/B on real traffic: which Qwen is operationally stronger?
 
@@ -108,7 +134,7 @@ This section is where rigor matters most, because model comparisons are the easi
 
 Traffic is observational, not randomized. So instead of comparing raw global averages, we build a quasi-experimental design: coarsened matching by prompt size, cache-hit region, and session progress; then pairwise effect estimation with bootstrap confidence intervals; then balance diagnostics to verify comparability.
 
-The measured effects (35B-A3B minus 27B) are substantial in this telemetry slice. Prefill time is about -26.12 s with a confidence interval fully below zero. Decode time is about -15.76 s, again with interval below zero. Peak memory is about -4.75 GB, also clearly below zero. Throughput, evaluated in the dedicated throughput section and table, moves in the opposite direction as expected (higher is better), with decode throughput around +31.52 tokens/s and prefill throughput around +128.58 tokens/s in matched comparisons.
+The measured effects (35B-A3B minus 27B) are substantial in this telemetry slice. Prefill time is about -23.30 s with a confidence interval fully below zero. Decode time is about -14.47 s, again with interval below zero. Peak memory is about -4.62 GB, also clearly below zero. Throughput, evaluated in the dedicated throughput section and table, moves in the opposite direction as expected (higher is better), with decode throughput around +29.95 tokens/s and prefill throughput around +117.11 tokens/s in matched comparisons.
 
 Interpretation: on this workload, Qwen3.6-35B-A3B is not merely competitive; it is consistently stronger on latency, memory, and throughput after adjustment for key workload differences.
 
@@ -124,7 +150,7 @@ Still, for this stack and these sessions, the decision signal is clear enough to
 
 We also trained a logistic crash-risk model from memory and request-shape features. The motivation is straightforward: fixed thresholds are useful but coarse, while a probabilistic score can surface relative risk earlier.
 
-At the moment, the model is directionally useful but not yet calibration-grade. Temporal validation is unstable in the latest split because positive-event prevalence is very low. The current metrics reflect this limitation (train AUC around 0.595, test AUC around 0.167, near-zero prevalence in test).
+At the moment, the model is directionally useful but not yet calibration-grade. Temporal validation is still unstable in the latest split. The current metrics reflect this limitation (train AUC around 0.561, test AUC around 0.442, temporal reliability still marked low).
 
 So the correct operational use is ranking and warning, not hard gating.
 
@@ -140,7 +166,7 @@ So think of this as decision-quality operational evidence, not as a universal be
 
 ## Executive summary
 
-If you operate Kowalski on production-like local workflows, the evidence supports a clear policy. Use Qwen3.6-35B-A3B as the default interactive model for this environment. Keep Qwen3.6-27B as fallback and baseline. Treat memory as the first reliability guardrail and react before repeated peaks around 48 GB. Use Headroom and DFlash as complementary levers that activate at different phases. Use crash-risk scoring as warning intelligence until temporal validation becomes stable enough for stricter controls.
+If you operate Kowalski on production-like local workflows, the evidence supports a clear policy. With the published Ornith update, use Ornith-1.0-35B MoE as the default DFlash interactive route for this environment, keep Qwen3.6-35B-A3B as a high-throughput comparison path, and keep Qwen3.6-27B as fallback and baseline. Treat memory as the first reliability guardrail and react before repeated peaks around 48 GB. Use Headroom and DFlash as complementary levers that activate at different phases. Use crash-risk scoring as warning intelligence until temporal validation becomes stable enough for stricter controls.
 
 If this article had to collapse into one sentence, it would be this:
 

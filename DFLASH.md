@@ -20,10 +20,10 @@ env/bin/python llmstack/tools/dflash_metrics.py --update-dflash-md
 
 | Metric | Value |
 |---|---:|
-| dflash rows in CSV | 3,369 |
-| clean dflash rows | 3,364 |
-| parser outliers removed | 5 |
-| sessions | 23 |
+| dflash rows in CSV | 7,326 |
+| clean dflash rows | 7,320 |
+| parser outliers removed | 6 |
+| sessions | 31 |
 
 <!-- DFLASH_CORE_TABLE_END -->
 
@@ -53,15 +53,15 @@ From the clean dflash sample:
 
 | Metric | Value |
 |---|---:|
-| Cache-hit median | 99.50% |
-| Cache-hit mean | 88.96% |
-| Prefill median | 2.40 s |
-| Prefill mean | 24.22 s |
-| Prefill 90th percentile | 67.44 s |
-| Prefill <= 2 s | 46.0% |
-| Prefill <= 5 s | 63.0% |
-| Requests with >= 95% cache | 76.5% |
-| Requests with >= 99% cache | 59.5% |
+| Cache-hit median | 99.80% |
+| Cache-hit mean | 92.58% |
+| Prefill median | 1.10 s |
+| Prefill mean | 13.16 s |
+| Prefill 90th percentile | 22.61 s |
+| Prefill <= 2 s | 63.8% |
+| Prefill <= 5 s | 76.6% |
+| Requests with >= 95% cache | 82.9% |
+| Requests with >= 99% cache | 71.3% |
 
 <!-- DFLASH_LOGS_TABLE_END -->
 
@@ -103,10 +103,10 @@ What the numbers tell us:
 <!-- DFLASH_CACHE_BAND_BLOCK_START -->
 
 ```text
-80-90%   n= 211 median_prefill= 62.10s
-90-95%   n= 112 median_prefill= 30.30s
-95-99%   n= 572 median_prefill=  8.40s
-99-100%  n=2001 median_prefill=  1.20s
+80-90%   n= 323 median_prefill= 45.80s
+90-95%   n= 194 median_prefill= 12.10s
+95-99%   n= 853 median_prefill=  4.80s
+99-100%  n=5218 median_prefill=  0.90s
 ```
 
 <!-- DFLASH_CACHE_BAND_BLOCK_END -->
@@ -131,12 +131,12 @@ What the numbers tell us:
 <!-- DFLASH_UNCACHED_BAND_BLOCK_START -->
 
 ```text
-<= 100    n=1614 median_prefill=  0.80s
-<= 500    n= 600 median_prefill=  3.65s
-<= 1000   n= 249 median_prefill=  9.60s
-<= 5000   n= 425 median_prefill= 20.30s
-<= 10000  n= 266 median_prefill= 71.35s
-<= 20000  n= 104 median_prefill=152.35s
+<= 100    n=4378 median_prefill=  0.80s
+<= 500    n=1165 median_prefill=  2.20s
+<= 1000   n= 380 median_prefill=  5.20s
+<= 5000   n= 686 median_prefill= 13.15s
+<= 10000  n= 422 median_prefill= 24.60s
+<= 20000  n= 141 median_prefill= 88.70s
 ```
 
 <!-- DFLASH_UNCACHED_BAND_BLOCK_END -->
@@ -253,8 +253,9 @@ Different targets often run under different workload mixes and scaffold reuse pa
 
 | Target | Rows | Median prefill | p90 prefill | Median cache hit | Share >=99% cache |
 |---|---:|---:|---:|---:|---:|
+| `mlx-community/Ornith-1.0-35B-4bit` | 3,300 | 1.00 s | 6.00 s | 99.90% | 84.2% |
 | `mlx-community/Qwen3.6-27B-4bit` | 2,094 | 3.60 s | 88.47 s | 99.50% | 57.7% |
-| `mlx-community/Qwen3.6-35B-A3B-4bit` | 1,079 | 1.10 s | 16.72 s | 99.60% | 64.7% |
+| `mlx-community/Qwen3.6-35B-A3B-4bit` | 1,621 | 0.90 s | 14.70 s | 99.70% | 65.4% |
 | `mlx-community/gemma-4-12B-4bit` | 113 | 2.10 s | 13.98 s | 99.50% | 65.5% |
 
 <!-- DFLASH_MODEL_TABLE_END -->

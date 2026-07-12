@@ -19,11 +19,13 @@ from llmstack.tools.plot_savings import (
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_MODELS = [
+    "mlx-community/Ornith-1.0-35B-4bit",
     "mlx-community/Qwen3.6-27B-4bit",
     "mlx-community/Qwen3.6-35B-A3B-4bit",
     "mlx-community/gemma-4-12B-4bit",
 ]
 LABEL_OVERRIDES = {
+    "mlx-community/Ornith-1.0-35B-4bit": "Ornith-1.0-35B",
     "mlx-community/Qwen3.6-27B-4bit": "Qwen3.6-27B",
     "mlx-community/Qwen3.6-35B-A3B-4bit": "Qwen3.6-35B-A3B",
     "mlx-community/gemma-4-12B-4bit": "Gemma-4-12B",

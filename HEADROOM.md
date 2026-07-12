@@ -4,8 +4,8 @@ This document explains when Headroom is effective, when it is not, and why the s
 increase sharply in long agentic sessions. The analysis uses real telemetry from
 `logs/headroom_traffic.jsonl` and the same session-splitting rule used by the timing charts.
 
-All numbers below come from 3,146 recorded Headroom requests across 24 work sessions.
-The data spans 2026-06-21 → 2026-07-05 and reflects the current local stack behavior.
+All numbers below come from 7,067 recorded Headroom requests across 33 work sessions.
+The data spans 2026-06-21 → 2026-07-12 and reflects the current local stack behavior.
 
 ---
 
@@ -41,18 +41,18 @@ env/bin/python llmstack/tools/headroom_metrics.py --update-headroom-md
 
 | Metric | Value |
 |---|---:|
-| Requests | 3,146 |
-| Sessions | 24 |
-| Total original tokens | 158,977,848 |
-| Total tokens saved | 18,436,841 |
-| Weighted savings | 11.60% |
-| Tokens retained after optimization | 88.40% |
-| Mean savings per request | 6.76% |
-| Median savings per request | 4.39% |
-| 90th percentile savings | 14.87% |
+| Requests | 7,067 |
+| Sessions | 33 |
+| Total original tokens | 390,402,708 |
+| Total tokens saved | 38,031,819 |
+| Weighted savings | 9.74% |
+| Tokens retained after optimization | 90.26% |
+| Mean savings per request | 6.24% |
+| Median savings per request | 4.37% |
+| 90th percentile savings | 13.56% |
 | Max savings | 49.32% |
-| Zero-savings share | 39.3% |
-| Requests at 20%+ savings | 7.1% |
+| Zero-savings share | 37.7% |
+| Requests at 20%+ savings | 6.5% |
 
 <!-- HEADROOM_CORE_TABLE_END -->
 
@@ -182,11 +182,11 @@ The data fits a threshold model better than a pure linear model.
 <!-- HEADROOM_PIECEWISE_START -->
 
 ```text
-0k-10k    n= 177 median= 0.00% mean= 0.12% share>=20%= 0.0%
-10k-30k   n= 973 median= 0.00% mean= 1.06% share>=20%= 0.5%
-30k-40k   n= 553 median= 5.17% mean= 5.80% share>=20%= 4.3%
-40k-60k   n= 661 median= 7.64% mean= 8.49% share>=20%= 4.8%
-60k+      n= 782 median=11.60% mean=14.58% share>=20%=20.7%
+0k-10k    n= 618 median= 0.00% mean= 0.07% share>=20%= 0.2%
+10k-30k   n=1592 median= 0.00% mean= 0.97% share>=20%= 0.4%
+30k-40k   n= 815 median= 4.69% mean= 5.44% share>=20%= 3.2%
+40k-60k   n=1417 median= 7.46% mean= 7.51% share>=20%= 4.4%
+60k+      n=2625 median= 6.74% mean=10.45% share>=20%=13.7%
 ```
 
 <!-- HEADROOM_PIECEWISE_END -->
@@ -196,15 +196,15 @@ The data fits a threshold model better than a pure linear model.
 <!-- HEADROOM_REGRESSION_START -->
 
 ```text
-savings_percent ≈ -26.91 + 7.75*log10(prompt_tokens)
-                 + 4.02*session_progress
-                 - 3.25*cache_hit
-                 - 2.27*noop
+savings_percent ≈ -22.22 + 6.70*log10(prompt_tokens)
+                 + 3.03*session_progress
+                 - 3.48*cache_hit
+                 - 2.28*noop
 ```
 
 <!-- HEADROOM_REGRESSION_END -->
 
-This linear model is only a rough guide. Its $R^2$ is about 0.25, so it is useful for
+This linear model is only a rough guide. Its $R^2$ is about 0.20, so it is useful for
 direction, not for precise forecasting. The piecewise model above is more actionable.
 
 ### 3.1 Per-model split: useful, but not causal
@@ -219,8 +219,9 @@ Current split (models with meaningful sample size):
 
 | Model | n | Mean savings | Median savings | p90 savings | Share >=20% |
 |---|---:|---:|---:|---:|---:|
+| `mlx-community/Ornith-1.0-35B-4bit` | 3,243 | 6.51% | 4.81% | 13.48% | 7.2% |
 | `mlx-community/Qwen3.6-27B-4bit` | 1,665 | 6.70% | 5.55% | 11.58% | 5.9% |
-| `mlx-community/Qwen3.6-35B-A3B-4bit` | 1,428 | 7.09% | 0.42% | 17.02% | 8.7% |
+| `mlx-community/Qwen3.6-35B-A3B-4bit` | 2,106 | 5.61% | 0.00% | 14.00% | 5.9% |
 
 <!-- HEADROOM_MODEL_TABLE_END -->
 

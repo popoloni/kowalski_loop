@@ -72,7 +72,7 @@ The charts use a median binned line and bootstrap confidence intervals by defaul
 | View | File | Default statistic | Confidence intervals | What to look for |
 | --- | --- | --- | --- | --- |
 | Overall | [savings_landscape.png](docs/img/savings/savings_landscape.png) | median | on | one center line for each layer, showing the overall trend across all samples |
-| Per model | [savings_landscape_by_model.png](docs/img/savings/savings_landscape_by_model.png) | median | on | separate colored trend lines for Qwen3.6-27B, Qwen3.6-35B-A3B, and Gemma-4-12B |
+| Per model | [savings_landscape_by_model.png](docs/img/savings/savings_landscape_by_model.png) | median | on | separate colored trend lines for Ornith-1.0-35B (red), Qwen3.6-27B, Qwen3.6-35B-A3B, and Gemma-4-12B |
 
 Run the utility that generated them:
 
@@ -113,35 +113,35 @@ It is the most conservative summary of the stack: one central line per layer, wi
 ![Savings landscape by model](docs/img/savings/savings_landscape_by_model.png)
 
 This version colors the samples by their original model and uses the same median-plus-CI treatment per model.
-It shows Qwen3.6-27B, Qwen3.6-35B-A3B, and Gemma-4-12B as separate traces, which makes model-specific slope differences visible inside the same prompt or decode bands.
+It shows Ornith-1.0-35B (red), Qwen3.6-27B, Qwen3.6-35B-A3B, and Gemma-4-12B as separate traces, which makes model-specific slope differences visible inside the same prompt or decode bands.
 
 ---
 
 ## 5. Results table
 
 The table below summarizes the main values observed in the current logs.
-Model-specific values now include Qwen3.6-27B, Qwen3.6-35B-A3B, and Gemma-4-12B.
+Model-specific values now include Ornith-1.0-35B, Qwen3.6-27B, Qwen3.6-35B-A3B, and Gemma-4-12B.
 Headroom values are now computed per model using the `model` field in `headroom_traffic.jsonl`.
 
 <!-- SAVINGS_TABLE_START -->
 
-| Metric | Qwen3.6-27B | Qwen3.6-35B-A3B | Gemma-4-12B | Notes |
-| --- | ---: | ---: | ---: | --- |
-| Samples (dflash rows) | 2094 | 1079 | 113 | rows with valid prefill/decode/tokens |
-| Samples (headroom rows) | 1616 | 1336 | 11 | rows with valid headroom savings and input_tokens_original >= 5000 |
-| Memory peak, median | 42.81 GB | 34.96 GB | 40.33 GB | median mlx peak per model |
-| Memory peak, p90 | 46.17 GB | 44.45 GB | 47.59 GB | tail mlx peak per model |
-| Headroom savings, median | 5.75% | 2.06% | 0.00% | computed from headroom model field on the same >=5000-token scope as the chart |
-| Headroom savings, p90 | 12.12% | 18.19% | 0.43% | late-session tail by model |
-| Headroom savings >= 20% | 6.1% | 9.3% | 0.0% | share of strong-compression turns |
-| DFlash prefill, median | 3.60 s | 1.10 s | 2.10 s | lower is better |
-| DFlash prefill, p90 | 88.47 s | 16.72 s | 13.98 s | long-tail prefill latency |
-| Output decode, median | 7.30 s | 1.90 s | 2.60 s | center decode latency |
-| Output decode, p90 | 34.72 s | 11.12 s | 10.56 s | decode long tail |
-| Decode tokens, median | 86 | 76 | 105 | output length center |
-| Decode tokens, p90 | 453 | 371 | 446 | output length tail |
-| DFlash share <= 2 s | 36.9% | 65.3% | 49.6% | fraction of fast-prefill requests |
-| DFlash share > 99% cache | 57.7% | 64.7% | 65.5% | fraction in high-reuse regime |
+| Metric | Ornith-1.0-35B | Qwen3.6-27B | Qwen3.6-35B-A3B | Gemma-4-12B | Notes |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Samples (dflash rows) | 3300 | 2094 | 1621 | 113 | rows with valid prefill/decode/tokens |
+| Samples (headroom rows) | 3181 | 1616 | 1927 | 11 | rows with valid headroom savings and input_tokens_original >= 5000 |
+| Memory peak, median | 42.45 GB | 42.81 GB | 36.01 GB | 40.33 GB | median mlx peak per model |
+| Memory peak, p90 | 43.05 GB | 46.17 GB | 44.45 GB | 47.59 GB | tail mlx peak per model |
+| Headroom savings, median | 4.90% | 5.75% | 0.63% | 0.00% | computed from headroom model field on the same >=5000-token scope as the chart |
+| Headroom savings, p90 | 13.57% | 12.12% | 14.23% | 0.43% | late-session tail by model |
+| Headroom savings >= 20% | 7.3% | 6.1% | 6.5% | 0.0% | share of strong-compression turns |
+| DFlash prefill, median | 1.00 s | 3.60 s | 0.90 s | 2.10 s | lower is better |
+| DFlash prefill, p90 | 6.00 s | 88.47 s | 14.70 s | 13.98 s | long-tail prefill latency |
+| Output decode, median | 3.30 s | 7.30 s | 1.80 s | 2.60 s | center decode latency |
+| Output decode, p90 | 7.30 s | 34.72 s | 9.90 s | 10.56 s | decode long tail |
+| Decode tokens, median | 152 | 86 | 76 | 105 | output length center |
+| Decode tokens, p90 | 346 | 453 | 369 | 446 | output length tail |
+| DFlash share <= 2 s | 81.2% | 36.9% | 68.4% | 49.6% | fraction of fast-prefill requests |
+| DFlash share > 99% cache | 84.2% | 57.7% | 65.4% | 65.5% | fraction in high-reuse regime |
 
 <!-- SAVINGS_TABLE_END -->
 
@@ -165,7 +165,7 @@ See the detailed model and RAM table in [MEMORY.md](MEMORY.md).
 
 The Headroom analysis is now computed per model directly from `headroom_traffic.jsonl`.
 To match the chart exactly, the metrics use the same Headroom scope: only calls with `input_tokens_original >= 5000`.
-In this sample, Qwen3.6-27B has higher median savings (5.75%) than Qwen3.6-35B-A3B (2.06%), while 35B-A3B has the stronger p90 tail (18.19%).
+In this sample, Qwen3.6-27B has the highest median savings (5.75%), Ornith-1.0-35B is close (4.90%), and Qwen3.6-35B-A3B is lower at the center (0.63%) but retains a stronger p90 tail (14.23%).
 Gemma shows near-zero headroom savings in this slice, but the sample is small (`n=11`) and should be interpreted cautiously.
 
 What the median curve is telling you:
@@ -211,7 +211,7 @@ Practical model:
 2. `decode_time_s ≈ decode_tokens / model_decode_tps`.
 3. `total_time_s ≈ prefill_time_s + decode_time_s + overhead`.
 
-The useful conclusion is simple: Headroom and DFlash buy you faster time-to-first-token and lower total latency, but long answers still dominate the tail. In the current by-model chart, Qwen3.6-27B sits above Qwen3.6-35B-A3B as token count grows, so the 27B trace is the slower decode path for long generations. Gemma-4-12B is generally between those two on decode time in this dataset, but with fewer samples. The savings layers compress the front of the request; they do not compress the answer length.
+The useful conclusion is simple: Headroom and DFlash buy you faster time-to-first-token and lower total latency, but long answers still dominate the tail. In the current by-model chart, Qwen3.6-27B remains the slowest decode path for long generations, Qwen3.6-35B-A3B remains the fastest decode path, and Ornith-1.0-35B sits in between on decode while contributing very strong prefill/cache behavior. Gemma-4-12B is still sample-limited. The savings layers compress the front of the request; they do not compress the answer length.
 
 ---
 
