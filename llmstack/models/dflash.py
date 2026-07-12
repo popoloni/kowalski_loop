@@ -1,3 +1,7 @@
+from pathlib import Path
+import shutil
+import sys
+
 from .base import InferenceBackend
 
 
@@ -34,6 +38,14 @@ DFLASH_STABILITY_PROFILES = {
 
 
 class DFlashBackend(InferenceBackend):
+    def _dflash_executable(self):
+        # Prefer the venv-local executable so watchdog restarts do not depend on an activated shell PATH.
+        candidate = Path(sys.executable).resolve().parent / "dflash"
+        if candidate.exists():
+            return str(candidate)
+        found = shutil.which("dflash")
+        return found or "dflash"
+
     def _effective_serve_settings(self):
         c = self.cfg
         profile_name = str(c.get("stability_profile", "balanced") or "balanced").strip().lower()
@@ -63,7 +75,7 @@ class DFlashBackend(InferenceBackend):
         c = self.cfg
         s = self._effective_serve_settings()
         return [
-            "dflash", "serve",
+            self._dflash_executable(), "serve",
             "--model", c["target"],
             "--draft-model", c["draft"],
             "--host", self.serve_host(), "--port", str(self.serve_port()),

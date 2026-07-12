@@ -1,11 +1,9 @@
 {
   "dev_root": "./prj/pacman256_mvp_clone",
   "plan_file": "/Users/enricopapalini/.claude/plans/pacman-fixes-v2.json",
-
   "local_host": "127.0.0.1",
   "inference_port": 8787,
   "headroom_port": 8789,
-
   "log_dir": "./logs",
   "dflash_log": "./logs/dflash_server.log",
   "headroom_log": "./logs/headroom.log",
@@ -13,23 +11,19 @@
   "timings_csv": "./logs/dflash_timings.csv",
   "debug_log": "./logs/kowalski_debug.log",
   "debug_max_chars": 0,
-
   "permission_mode": "acceptEdits",
   "max_turns": 250,
   "timeout_seconds": 3600,
   "warmup_timeout_seconds": 120,
-
   "max_retries": 3,
   "max_resumes": 8,
   "agent_format_retries": 2,
   "allow_already_done_if_verified": true,
   "size_threshold_bytes": 12000,
-
   "agent_tools": [
     "Read",
     "Edit"
   ],
-
   "backend_stability_profile": "balanced",
   "backend_stability_overrides": {
     "max_tokens": 12288,
@@ -41,7 +35,7 @@
   "mlx_stability_overrides": {},
   "turboquant_stability_profile": null,
   "turboquant_stability_overrides": {},
-  "active_model": "dflash-ornith35b-moe",
+  "active_model": "dflash-qwen27b-dense",
   "models": {
     "dflash-qwen27b-dense": {
       "type": "dflash",

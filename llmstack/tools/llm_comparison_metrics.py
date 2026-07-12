@@ -34,9 +34,12 @@ RISK_TABLE_START = "<!-- LLM_RISK_TABLE_START -->"
 RISK_TABLE_END = "<!-- LLM_RISK_TABLE_END -->"
 MODEL_NOTE_START = "<!-- LLM_MODEL_NOTE_START -->"
 MODEL_NOTE_END = "<!-- LLM_MODEL_NOTE_END -->"
+ORNITH_AB_START = "<!-- ORNITH_AB_SECTION_START -->"
+ORNITH_AB_END = "<!-- ORNITH_AB_SECTION_END -->"
 
 QWEN_27 = "mlx-community/Qwen3.6-27B-4bit"
 QWEN_35 = "mlx-community/Qwen3.6-35B-A3B-4bit"
+ORNITH_35 = "mlx-community/Ornith-1.0-35B-4bit"
 
 
 @dataclass(frozen=True)
@@ -82,15 +85,23 @@ def _standardized_mean_diff(a: pd.Series, b: pd.Series) -> float:
     return float((av.mean() - bv.mean()) / pooled)
 
 
-def _load_qwen_clean_frame() -> pd.DataFrame:
+def _load_pair_clean_frame(models: list[str]) -> pd.DataFrame:
     df = _prepare_frame(_resolve_timings_csv())
-    df = df[df["served_target"].isin([QWEN_27, QWEN_35])].copy()
+    df = df[df["served_target"].isin(models)].copy()
     df["log_prompt"] = np.log10(df["prompt_tokens"].clip(lower=1))
     df["log_uncached"] = np.log10(df["uncached_tokens"].clip(lower=1))
     return df
 
 
-def _coarsen_and_pair(df: pd.DataFrame) -> pd.DataFrame:
+def _load_qwen_clean_frame() -> pd.DataFrame:
+    return _load_pair_clean_frame([QWEN_27, QWEN_35])
+
+
+def _load_risk_clean_frame() -> pd.DataFrame:
+    return _load_pair_clean_frame([QWEN_27, QWEN_35, ORNITH_35])
+
+
+def _coarsen_and_pair(df: pd.DataFrame, model_a: str, model_b: str) -> pd.DataFrame:
     work = df.copy()
     work["prompt_bin"] = pd.cut(work["prompt_tokens"], [0, 5000, 10000, 20000, 40000, 80000, 200000], include_lowest=True)
     work["cache_bin"] = pd.cut(work["cache_hit_pct"], [0, 80, 90, 95, 99, 100], include_lowest=True)
@@ -99,8 +110,8 @@ def _coarsen_and_pair(df: pd.DataFrame) -> pd.DataFrame:
     pairs: list[dict] = []
     strata = work.groupby(["prompt_bin", "cache_bin", "prog_bin"], observed=False)
     for key, chunk in strata:
-        a = chunk[chunk["served_target"] == QWEN_35].copy().sort_values("timestamp")
-        b = chunk[chunk["served_target"] == QWEN_27].copy().sort_values("timestamp")
+        a = chunk[chunk["served_target"] == model_a].copy().sort_values("timestamp")
+        b = chunk[chunk["served_target"] == model_b].copy().sort_values("timestamp")
         if a.empty or b.empty:
             continue
 
@@ -149,6 +160,15 @@ def _coarsen_and_pair(df: pd.DataFrame) -> pd.DataFrame:
                 }
             )
     return pd.DataFrame(pairs)
+
+
+def _label_for_model(model: str) -> str:
+    labels = {
+        QWEN_27: "Qwen3.6-27B-4bit",
+        QWEN_35: "Qwen3.6-35B-A3B-4bit",
+        ORNITH_35: "Ornith-1.0-35B-4bit",
+    }
+    return labels.get(model, model)
 
 
 def _fit_logistic(X: np.ndarray, y: np.ndarray, max_iter: int = 2000, lr: float = 0.01, l2: float = 1e-4) -> np.ndarray:
@@ -252,7 +272,8 @@ def _risk_model(df: pd.DataFrame) -> tuple[pd.DataFrame, np.ndarray, str, dict[s
         work["near_crash"] = (work["mlx_peak_gb"] >= 48).astype(int)
         label_note = "high-risk-proxy(mlx_peak_gb>=48)"
 
-    work["model_is_35"] = (work["served_target"] == QWEN_35).astype(int)
+    work["model_is_qwen35"] = (work["served_target"] == QWEN_35).astype(int)
+    work["model_is_ornith35"] = (work["served_target"] == ORNITH_35).astype(int)
     work["log_prompt"] = np.log10(work["prompt_tokens"].clip(lower=1))
     work["log_uncached"] = np.log10(work["uncached_tokens"].clip(lower=1))
     work["prefill_tail"] = (work["prefill_time_s"] >= work["prefill_time_s"].quantile(0.95)).astype(int)
@@ -264,7 +285,8 @@ def _risk_model(df: pd.DataFrame) -> tuple[pd.DataFrame, np.ndarray, str, dict[s
             work["log_prompt"].to_numpy(),
             work["log_uncached"].to_numpy(),
             work["prefill_tail"].to_numpy(),
-            work["model_is_35"].to_numpy(),
+            work["model_is_qwen35"].to_numpy(),
+            work["model_is_ornith35"].to_numpy(),
         ]
     )
     y = work["near_crash"].to_numpy().astype(float)
@@ -298,7 +320,8 @@ def _risk_model(df: pd.DataFrame) -> tuple[pd.DataFrame, np.ndarray, str, dict[s
                 tr["log_prompt"].to_numpy(),
                 tr["log_uncached"].to_numpy(),
                 tr["prefill_tail"].to_numpy(),
-                tr["model_is_35"].to_numpy(),
+                tr["model_is_qwen35"].to_numpy(),
+                tr["model_is_ornith35"].to_numpy(),
             ]
         )
         y_train = tr["near_crash"].to_numpy().astype(float)
@@ -309,7 +332,8 @@ def _risk_model(df: pd.DataFrame) -> tuple[pd.DataFrame, np.ndarray, str, dict[s
                 te["log_prompt"].to_numpy(),
                 te["log_uncached"].to_numpy(),
                 te["prefill_tail"].to_numpy(),
-                te["model_is_35"].to_numpy(),
+                te["model_is_qwen35"].to_numpy(),
+                te["model_is_ornith35"].to_numpy(),
             ]
         )
         y_test = te["near_crash"].to_numpy().astype(float)
@@ -397,6 +421,65 @@ def _plot_throughput_effects(effects: list[Effect]) -> None:
     plt.close(fig)
 
 
+def _plot_pair_summary(
+    effects: list[Effect],
+    throughput_effects: list[Effect],
+    *,
+    effect_xlabel: str,
+    throughput_xlabel: str,
+    title: str,
+    output_name: str,
+    effect_color: str = "#1f6feb",
+    throughput_color: str = "#059669",
+) -> None:
+    fig, axes = plt.subplots(
+        2,
+        1,
+        figsize=(9.0, 6.8),
+        gridspec_kw={"height_ratios": [1.15, 0.95], "hspace": 0.32},
+        constrained_layout=False,
+    )
+
+    eff_names = [effect.metric for effect in effects]
+    eff_est = np.array([effect.estimate for effect in effects])
+    eff_lo = np.array([effect.ci_low for effect in effects])
+    eff_hi = np.array([effect.ci_high for effect in effects])
+    eff_y = np.arange(len(effects))
+
+    ax = axes[0]
+    ax.errorbar(eff_est, eff_y, xerr=np.vstack([eff_est - eff_lo, eff_hi - eff_est]), fmt="o", color=effect_color, capsize=3)
+    ax.axvline(0.0, color="#6b7280", ls="--", lw=1.0)
+    ax.set_yticks(eff_y, eff_names)
+    ax.set_xlabel(effect_xlabel)
+    ax.set_title("Latency and memory effects", pad=8)
+    ax.grid(True, axis="x", ls="--", alpha=0.25)
+    ax.margins(y=0.18)
+
+    t_names = [effect.metric for effect in throughput_effects]
+    t_est = np.array([effect.estimate for effect in throughput_effects])
+    t_lo = np.array([effect.ci_low for effect in throughput_effects])
+    t_hi = np.array([effect.ci_high for effect in throughput_effects])
+    t_y = np.arange(len(throughput_effects))
+
+    ax = axes[1]
+    ax.errorbar(t_est, t_y, xerr=np.vstack([t_est - t_lo, t_hi - t_est]), fmt="o", color=throughput_color, capsize=3)
+    ax.axvline(0.0, color="#6b7280", ls="--", lw=1.0)
+    ax.set_yticks(t_y, t_names)
+    ax.set_xlabel(throughput_xlabel)
+    ax.set_title("Throughput effects", pad=8)
+    ax.grid(True, axis="x", ls="--", alpha=0.25)
+    ax.margins(y=0.22)
+
+    for axis in axes:
+        axis.tick_params(axis="y", labelsize=9)
+        axis.tick_params(axis="x", labelsize=9)
+
+    fig.suptitle(title, fontsize=12)
+    fig.subplots_adjust(top=0.92, bottom=0.08, left=0.16, right=0.98)
+    fig.savefig(IMG_DIR / output_name, dpi=140)
+    plt.close(fig)
+
+
 def _plot_ab_stack(
     effects: list[Effect],
     before: dict[str, float],
@@ -447,10 +530,10 @@ def _plot_ab_stack(
     plt.close(fig)
 
 
-def _plot_risk_curve(beta: np.ndarray, base_row_27: pd.Series, base_row_35: pd.Series) -> None:
+def _plot_risk_curve(beta: np.ndarray, base_row_27: pd.Series, base_row_35: pd.Series, base_row_ornith: pd.Series) -> None:
     peaks = np.linspace(35, 56, 120)
 
-    def probs(base: pd.Series, model_is_35: int) -> np.ndarray:
+    def probs(base: pd.Series, model_is_qwen35: int, model_is_ornith35: int) -> np.ndarray:
         X = np.column_stack(
             [
                 np.ones_like(peaks),
@@ -458,18 +541,21 @@ def _plot_risk_curve(beta: np.ndarray, base_row_27: pd.Series, base_row_35: pd.S
                 np.full_like(peaks, float(base["log_prompt"])),
                 np.full_like(peaks, float(base["log_uncached"])),
                 np.full_like(peaks, float(base["prefill_tail"])),
-                np.full_like(peaks, float(model_is_35)),
+                np.full_like(peaks, float(model_is_qwen35)),
+                np.full_like(peaks, float(model_is_ornith35)),
             ]
         )
         z = X @ beta
         return 1.0 / (1.0 + np.exp(-np.clip(z, -50, 50)))
 
-    p27 = probs(base_row_27, 0)
-    p35 = probs(base_row_35, 1)
+    p27 = probs(base_row_27, 0, 0)
+    p35 = probs(base_row_35, 1, 0)
+    pornith = probs(base_row_ornith, 0, 1)
 
     fig, ax = plt.subplots(figsize=(8.8, 4.8))
     ax.plot(peaks, p27, color="#1f6feb", lw=2, label="Qwen3.6-27B")
     ax.plot(peaks, p35, color="#d97706", lw=2, label="Qwen3.6-35B-A3B")
+    ax.plot(peaks, pornith, color="#c1121f", lw=2, label="Ornith-1.0-35B")
     ax.axvline(48, color="#6b7280", ls=":", lw=1)
     ax.axvline(52, color="#dc2626", ls=":", lw=1)
     ax.set_xlabel("MLX peak memory (GB)")
@@ -491,9 +577,9 @@ def _replace_between_markers(content: str, start: str, end: str, payload: str) -
     return content[:pivot] + "\n\n" + payload + "\n\n" + content[j:]
 
 
-def _ab_table(effects: list[Effect], n_pairs: int) -> str:
+def _ab_table(effects: list[Effect], n_pairs: int, *, model_a_label: str, model_b_label: str) -> str:
     lines = [
-        "| Outcome | Matched effect (35B-A3B - 27B) | 95% CI | Conclusive? |",
+        f"| Outcome | Matched effect ({model_a_label} - {model_b_label}) | 95% CI | Conclusive? |",
         "|---|---:|---:|---:|",
     ]
     for e in effects:
@@ -505,16 +591,25 @@ def _ab_table(effects: list[Effect], n_pairs: int) -> str:
     return "\n".join(lines)
 
 
-def _throughput_table(df: pd.DataFrame, effects: list[Effect], n_pairs: int) -> str:
-    labels = {
-        QWEN_35: "Qwen3.6-35B-A3B-4bit",
-        QWEN_27: "Qwen3.6-27B-4bit",
-    }
+def _throughput_table(
+    df: pd.DataFrame,
+    effects: list[Effect],
+    n_pairs: int,
+    *,
+    model_a: str,
+    model_b: str,
+    model_a_label: str,
+    model_b_label: str,
+) -> str:
     raw_lines = [
         "| Model | decode_tps median | decode_tps p90 | prefill_real_tps median | prefill_real_tps p90 |",
         "|---|---:|---:|---:|---:|",
     ]
-    for model in [QWEN_35, QWEN_27]:
+    labels = {
+        model_a: model_a_label,
+        model_b: model_b_label,
+    }
+    for model in [model_a, model_b]:
         g = df[df["served_target"] == model]
         decode = pd.to_numeric(g["decode_tps"], errors="coerce").dropna()
         prefill = pd.to_numeric(g["prefill_real_tps"], errors="coerce").dropna()
@@ -523,7 +618,7 @@ def _throughput_table(df: pd.DataFrame, effects: list[Effect], n_pairs: int) -> 
         )
 
     effect_lines = [
-        "| Throughput metric | Matched effect (35B-A3B - 27B) | 95% CI | Better when |",
+        f"| Throughput metric | Matched effect ({model_a_label} - {model_b_label}) | 95% CI | Better when |",
         "|---|---:|---:|---|",
     ]
     for e in effects:
@@ -572,7 +667,8 @@ def _risk_table(risk_df: pd.DataFrame, beta: np.ndarray, label_note: str, tempor
         f"| Coef: log_prompt | {_fmt_num(beta[2], 3)} |",
         f"| Coef: log_uncached | {_fmt_num(beta[3], 3)} |",
         f"| Coef: prefill_tail | {_fmt_num(beta[4], 3)} |",
-        f"| Coef: model_is_35 | {_fmt_num(beta[5], 3)} |",
+        f"| Coef: model_is_qwen35 | {_fmt_num(beta[5], 3)} |",
+        f"| Coef: model_is_ornith35 | {_fmt_num(beta[6], 3)} |",
     ]
     return "\n".join(lines)
 
@@ -587,19 +683,14 @@ def update_markdown(md_path: Path, ab: str, balance: str, throughput: str, risk:
     md_path.write_text(content, encoding="utf-8")
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Qwen A/B + crash-risk analysis")
-    parser.add_argument("--update-md", action="store_true", help="Update LLM_COMPARISON.md marker blocks")
-    parser.add_argument("--markdown", type=Path, default=ROOT / "LLM_COMPARISON.md", help="Path to markdown output")
-    return parser.parse_args()
+def update_ornith_section(md_path: Path, payload: str) -> None:
+    content = md_path.read_text(encoding="utf-8")
+    content = _replace_between_markers(content, ORNITH_AB_START, ORNITH_AB_END, payload)
+    md_path.write_text(content, encoding="utf-8")
 
 
-def main() -> None:
-    args = parse_args()
-    df = _load_qwen_clean_frame()
-
-    # A/B matching
-    pairs = _coarsen_and_pair(df)
+def _pairwise_result(df: pd.DataFrame, model_a: str, model_b: str) -> tuple[pd.DataFrame, list[Effect], list[Effect], dict[str, float], dict[str, float]]:
+    pairs = _coarsen_and_pair(df, model_a, model_b)
     effects = [
         Effect("prefill_time_s", *_bootstrap_ci(pairs["prefill_diff"].to_numpy()), "s"),
         Effect("decode_time_s", *_bootstrap_ci(pairs["decode_diff"].to_numpy()), "s"),
@@ -611,16 +702,10 @@ def main() -> None:
     ]
 
     before = {
-        "log_prompt": _standardized_mean_diff(df[df["served_target"] == QWEN_35]["log_prompt"], df[df["served_target"] == QWEN_27]["log_prompt"]),
-        "cache_hit_pct": _standardized_mean_diff(
-            df[df["served_target"] == QWEN_35]["cache_hit_pct"], df[df["served_target"] == QWEN_27]["cache_hit_pct"]
-        ),
-        "log_uncached": _standardized_mean_diff(
-            df[df["served_target"] == QWEN_35]["log_uncached"], df[df["served_target"] == QWEN_27]["log_uncached"]
-        ),
-        "session_progress": _standardized_mean_diff(
-            df[df["served_target"] == QWEN_35]["session_progress"], df[df["served_target"] == QWEN_27]["session_progress"]
-        ),
+        "log_prompt": _standardized_mean_diff(df[df["served_target"] == model_a]["log_prompt"], df[df["served_target"] == model_b]["log_prompt"]),
+        "cache_hit_pct": _standardized_mean_diff(df[df["served_target"] == model_a]["cache_hit_pct"], df[df["served_target"] == model_b]["cache_hit_pct"]),
+        "log_uncached": _standardized_mean_diff(df[df["served_target"] == model_a]["log_uncached"], df[df["served_target"] == model_b]["log_uncached"]),
+        "session_progress": _standardized_mean_diff(df[df["served_target"] == model_a]["session_progress"], df[df["served_target"] == model_b]["session_progress"]),
     }
     after = {
         "log_prompt": _standardized_mean_diff(pairs["a_log_prompt"], pairs["b_log_prompt"]),
@@ -628,9 +713,77 @@ def main() -> None:
         "log_uncached": _standardized_mean_diff(pairs["a_log_uncached"], pairs["b_log_uncached"]),
         "session_progress": _standardized_mean_diff(pairs["a_session_progress"], pairs["b_session_progress"]),
     }
+    return pairs, effects, throughput_effects, before, after
+
+
+def _ornith_ab_section_payload() -> str:
+    model_a = ORNITH_35
+    model_b = QWEN_35
+    model_a_label = _label_for_model(model_a)
+    model_b_label = _label_for_model(model_b)
+    df = _load_pair_clean_frame([model_a, model_b])
+    pairs, effects, throughput_effects, before, after = _pairwise_result(df, model_a, model_b)
+
+    effect_table = _ab_table(effects, len(pairs), model_a_label=model_a_label, model_b_label=model_b_label)
+    throughput_table = _throughput_table(
+        df,
+        throughput_effects,
+        len(pairs),
+        model_a=model_a,
+        model_b=model_b,
+        model_a_label=model_a_label,
+        model_b_label=model_b_label,
+    )
+    balance_table = _balance_table(before, after)
+
+    _plot_pair_summary(
+        effects,
+        throughput_effects,
+        effect_xlabel=f"Matched A/B effect ({model_a_label} - {model_b_label})",
+        throughput_xlabel=f"Matched throughput effect ({model_a_label} - {model_b_label}, tokens/s)",
+        title="Ornith vs Qwen35 matched A/B",
+        output_name="ornith_vs_qwen35_ab.png",
+        effect_color="#c1121f",
+        throughput_color="#d97706",
+    )
+
+    conclusive_flags = [effect.ci_low > 0 or effect.ci_high < 0 for effect in effects]
+    if all(conclusive_flags):
+        conclusion = "All tracked Ornith-vs-Qwen35 effects are conclusive in this matched slice."
+    elif any(conclusive_flags):
+        conclusion = "The Ornith-vs-Qwen35 comparison is only partially conclusive in this matched slice."
+    else:
+        conclusion = "The Ornith-vs-Qwen35 comparison is non-conclusive in this matched slice."
+
+    return "\n\n".join(
+        [
+            "This additional matched A/B isolates the two 35B-class routes currently most relevant for interactive local traffic. Positive values are better for throughput; negative values are better for latency and memory.",
+            "![Ornith vs Qwen35 matched A/B](docs/img/llm_comparison/ornith_vs_qwen35_ab.png)",
+            effect_table,
+            balance_table,
+            throughput_table,
+            conclusion,
+        ]
+    )
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Qwen A/B + crash-risk analysis")
+    parser.add_argument("--update-md", action="store_true", help="Update LLM_COMPARISON.md marker blocks")
+    parser.add_argument("--markdown", type=Path, default=ROOT / "LLM_COMPARISON.md", help="Path to markdown output")
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+    df = _load_qwen_clean_frame()
+    risk_source_df = _load_risk_clean_frame()
+
+    # A/B matching
+    pairs, effects, throughput_effects, before, after = _pairwise_result(df, QWEN_35, QWEN_27)
 
     # Risk model
-    risk_df, beta, label_note, temporal = _risk_model(df)
+    risk_df, beta, label_note, temporal = _risk_model(risk_source_df)
 
     # Plots
     _plot_effects(effects)
@@ -639,13 +792,23 @@ def main() -> None:
     _plot_ab_stack(effects, before, after, throughput_effects)
     base27 = risk_df[risk_df["served_target"] == QWEN_27].median(numeric_only=True)
     base35 = risk_df[risk_df["served_target"] == QWEN_35].median(numeric_only=True)
-    _plot_risk_curve(beta, base27, base35)
+    base_ornith = risk_df[risk_df["served_target"] == ORNITH_35].median(numeric_only=True)
+    _plot_risk_curve(beta, base27, base35, base_ornith)
 
     # Markdown payloads
-    ab_payload = _ab_table(effects, len(pairs))
+    ab_payload = _ab_table(effects, len(pairs), model_a_label=_label_for_model(QWEN_35), model_b_label=_label_for_model(QWEN_27))
     balance_payload = _balance_table(before, after)
-    throughput_payload = _throughput_table(df, throughput_effects, len(pairs))
+    throughput_payload = _throughput_table(
+        df,
+        throughput_effects,
+        len(pairs),
+        model_a=QWEN_35,
+        model_b=QWEN_27,
+        model_a_label=_label_for_model(QWEN_35),
+        model_b_label=_label_for_model(QWEN_27),
+    )
     risk_payload = _risk_table(risk_df, beta, label_note, temporal)
+    ornith_ab_payload = _ornith_ab_section_payload()
 
     conclusive_flags = [e.ci_low > 0 or e.ci_high < 0 for e in effects]
     if all(conclusive_flags):
@@ -672,6 +835,7 @@ def main() -> None:
 
     if args.update_md:
         update_markdown(args.markdown, ab_payload, balance_payload, throughput_payload, risk_payload, note)
+        update_ornith_section(args.markdown, ornith_ab_payload)
         print("Updated", args.markdown)
 
 

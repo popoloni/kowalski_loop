@@ -1,18 +1,20 @@
 # LLM_COMPARISON.md — Qwen A/B and Crash-Risk Modeling
 
-This report answers a practical question: which Qwen model behaves better on the real workload captured in the dflash telemetry, and for what kind of usage should each model be preferred?
+This report answers two practical questions on the real workload captured in the dflash telemetry: which Qwen model behaves better under matched comparison, and how Ornith-1.0-35B compares against Qwen3.6-35B-A3B on the same operational surface.
 
 The comparison is between:
 
 - `mlx-community/Qwen3.6-35B-A3B-4bit`
 - `mlx-community/Qwen3.6-27B-4bit`
+- `mlx-community/Ornith-1.0-35B-4bit` (additional matched A/B and crash-risk curve)
 
 The data comes from `logs/dflash_timings.csv`, using only the cleaned dflash rows.
 
-The report has two parts:
+The report has three parts:
 
 1. A matched A/B analysis that compares performance and memory after balancing the workload.
-2. A crash-risk model that tries to estimate when the system is under dangerous memory pressure.
+2. An additional matched A/B chapter that compares Ornith-1.0-35B and Qwen3.6-35B-A3B.
+3. A crash-risk model that tries to estimate when the system is under dangerous memory pressure.
 
 Run/update command:
 
@@ -49,7 +51,7 @@ For the crash-risk part, the report fits a logistic model. Logistic models are u
 4. A prefill-tail indicator.
 5. Which model was used.
 
-Important caveat: because true crash labels are sparse and unstable in this dataset, the risk model is currently best interpreted as an operational warning score, not as a calibrated crash probability.
+Important caveat: the risk target may be either a direct near-crash window label or a fallback proxy, depending on label availability in the current dataset. Even when temporal validation looks usable, the output should still be treated as an operational warning score rather than a fully calibrated crash probability.
 
 ---
 
@@ -82,7 +84,7 @@ The table below shows the matched difference between Qwen 35B-A3B and Qwen 27B a
 
 <!-- LLM_AB_TABLE_START -->
 
-| Outcome | Matched effect (35B-A3B - 27B) | 95% CI | Conclusive? |
+| Outcome | Matched effect (Qwen3.6-35B-A3B-4bit - Qwen3.6-27B-4bit) | 95% CI | Conclusive? |
 |---|---:|---:|---:|
 | prefill_time_s | -23.30 s | [-27.93, -19.43] s | yes |
 | decode_time_s | -14.47 s | [-17.86, -11.52] s | yes |
@@ -127,7 +129,7 @@ The raw numbers below are useful as a quick sanity check, but they can still be 
 | Qwen3.6-35B-A3B-4bit | 40.9 | 74.9 | 99.9 | 372.3 |
 | Qwen3.6-27B-4bit | 13.3 | 18.0 | 35.4 | 77.4 |
 
-| Throughput metric | Matched effect (35B-A3B - 27B) | 95% CI | Better when |
+| Throughput metric | Matched effect (Qwen3.6-35B-A3B-4bit - Qwen3.6-27B-4bit) | 95% CI | Better when |
 |---|---:|---:|---|
 | decode_tps | 29.95 tokens/s | [28.90, 30.98] tokens/s | higher |
 | prefill_real_tps | 117.11 tokens/s | [110.81, 123.36] tokens/s | higher |
@@ -138,6 +140,45 @@ The raw numbers below are useful as a quick sanity check, but they can still be 
 ![Throughput effects](docs/img/llm_comparison/throughput_effects.png)
 
 This standalone throughput figure shows the same pairwise comparison in token/sec terms. It stays compact on the page, and positive values are good because they mean Qwen 35B-A3B is faster after balancing the workload.
+
+## 4.1 Additional A/B: Ornith-1.0-35B vs Qwen3.6-35B-A3B
+
+The Qwen-vs-Qwen comparison remains useful as a controlled within-family baseline, but it no longer covers the full production decision surface. Ornith-1.0-35B is now a major live route in the traffic mix, so we add a second matched A/B focused on the two 35B-class interactive options.
+
+<!-- ORNITH_AB_SECTION_START -->
+
+This additional matched A/B isolates the two 35B-class routes currently most relevant for interactive local traffic. Positive values are better for throughput; negative values are better for latency and memory.
+
+![Ornith vs Qwen35 matched A/B](docs/img/llm_comparison/ornith_vs_qwen35_ab.png)
+
+| Outcome | Matched effect (Ornith-1.0-35B-4bit - Qwen3.6-35B-A3B-4bit) | 95% CI | Conclusive? |
+|---|---:|---:|---:|
+| prefill_time_s | -0.23 s | [-1.27, 0.63] s | no |
+| decode_time_s | -0.96 s | [-2.13, 0.14] s | no |
+| mlx_peak_gb | 2.01 GB | [1.61, 2.44] GB | yes |
+| Matched pairs | 1,055 | n/a | n/a |
+
+| Covariate | SMD before matching | SMD after matching |
+|---|---:|---:|
+| log_prompt | 0.550 | 0.016 |
+| cache_hit_pct | 0.278 | 0.001 |
+| log_uncached | -0.364 | -0.273 |
+| session_progress | 0.056 | -0.052 |
+
+| Model | decode_tps median | decode_tps p90 | prefill_real_tps median | prefill_real_tps p90 |
+|---|---:|---:|---:|---:|
+| Ornith-1.0-35B-4bit | 42.6 | 64.2 | 45.6 | 295.1 |
+| Qwen3.6-35B-A3B-4bit | 40.9 | 74.9 | 99.9 | 372.3 |
+
+| Throughput metric | Matched effect (Ornith-1.0-35B-4bit - Qwen3.6-35B-A3B-4bit) | 95% CI | Better when |
+|---|---:|---:|---|
+| decode_tps | 2.96 tokens/s | [1.57, 4.40] tokens/s | higher |
+| prefill_real_tps | -18.58 tokens/s | [-21.98, -15.16] tokens/s | higher |
+| Matched pairs | 1,055 | n/a | n/a |
+
+The Ornith-vs-Qwen35 comparison is only partially conclusive in this matched slice.
+
+<!-- ORNITH_AB_SECTION_END -->
 
 ---
 
@@ -151,9 +192,9 @@ How to read the crash-risk chart:
 
 1. The x-axis is peak memory in GB.
 2. The y-axis is the model’s predicted risk score.
-3. A rising curve means that higher memory pressure is associated with higher risk.
-4. The two lines compare the same memory range under the two model identities.
-5. Because the label is currently a proxy, the absolute probability should not be treated as a final calibrated number.
+3. If a curve rises, higher memory pressure is associated with higher risk for that model profile.
+4. The three lines compare the same memory range under the three model identities.
+5. The absolute probability should not be treated as a final calibrated number, even when the label comes from direct near-crash windows rather than a fallback proxy.
 
 The most important practical use of this chart is thresholding and alerting. It helps answer questions like: “At what memory level should we start warning the system?”
 
@@ -161,30 +202,31 @@ The most important practical use of this chart is thresholding and alerting. It 
 
 | Item | Value |
 |---|---:|
-| Risk label used | high-risk-proxy(mlx_peak_gb>=48) |
-| Positive events | 233 |
-| Positive prevalence | 6.27% |
-| Temporal split cutoff | 2026-07-05 15:01:28 UTC |
-| Temporal train rows | 2,972 |
-| Temporal test rows | 743 |
-| Temporal train prevalence | 6.86% |
-| Temporal test prevalence | 3.90% |
-| Temporal train AUC | 0.561 |
-| Temporal test AUC | 0.442 |
-| Temporal train Brier | 0.0667 |
-| Temporal test Brier | 0.0409 |
-| Temporal reliability | low (temporal split unstable) |
-| Coef: mlx_peak_gb | 0.034 |
-| Coef: log_prompt | -0.728 |
-| Coef: log_uncached | -0.101 |
-| Coef: prefill_tail | -0.002 |
-| Coef: model_is_35 | -0.283 |
+| Risk label used | near-crash-window |
+| Positive events | 219 |
+| Positive prevalence | 3.08% |
+| Temporal split cutoff | 2026-07-12 07:27:18 UTC |
+| Temporal train rows | 5,693 |
+| Temporal test rows | 1,424 |
+| Temporal train prevalence | 3.28% |
+| Temporal test prevalence | 2.25% |
+| Temporal train AUC | 0.349 |
+| Temporal test AUC | 0.931 |
+| Temporal train Brier | 0.0329 |
+| Temporal test Brier | 0.0209 |
+| Temporal reliability | acceptable |
+| Coef: mlx_peak_gb | -0.076 |
+| Coef: log_prompt | -0.108 |
+| Coef: log_uncached | 0.059 |
+| Coef: prefill_tail | -0.014 |
+| Coef: model_is_qwen35 | 0.107 |
+| Coef: model_is_ornith35 | 0.001 |
 
 <!-- LLM_RISK_TABLE_END -->
 
 ![Crash-risk curve](docs/img/llm_comparison/crash_risk_curve.png)
 
-This plot shows how the risk score changes as peak memory increases. The upward trend means that higher memory pressure is associated with higher risk. Because the label is currently a proxy, the absolute scale is less important than the shape of the curve and the threshold region around 48-52 GB.
+This plot shows how the risk score changes as peak memory increases for Qwen3.6-27B, Qwen3.6-35B-A3B, and Ornith-1.0-35B. The useful signal is the relative shape of the three curves and the threshold region around 48-52 GB, not the exact probability value.
 
 ---
 
@@ -192,7 +234,7 @@ This plot shows how the risk score changes as peak memory increases. The upward 
 
 <!-- LLM_MODEL_NOTE_START -->
 
-Matched A/B effects are statistically conclusive for all tracked outcomes under this observational design. Crash-risk temporal validation is non-conclusive (low event prevalence and/or weak test discrimination).
+Matched A/B effects are statistically conclusive for all tracked outcomes under this observational design. Crash-risk temporal validation is acceptable for monitoring use in the current three-model sample.
 
 <!-- LLM_MODEL_NOTE_END -->
 
@@ -214,10 +256,24 @@ Why:
 2. Lower memory peak in matched A/B.
 3. More favorable behavior under cache-heavy workloads.
 
+How the Ornith update changes this reading:
+
+1. The additional Ornith-vs-Qwen35 chapter is only partially conclusive overall.
+2. Ornith is slightly better on matched decode throughput, but it is worse on matched prefill throughput.
+3. Ornith also carries a clearly higher matched memory peak (`+2.00 GB` in this slice).
+4. The crash-risk curve now includes Ornith directly, which makes the memory tradeoff visible in the same threshold frame as the two Qwen routes.
+5. So the new evidence still does not displace Qwen3.6-35B-A3B as the safest default in this specific report; instead, it defines Ornith as a strong alternate route with different tradeoffs.
+
 When to prefer Qwen3.6-27B-4bit:
 
 1. You need a conservative fallback path for compatibility checks or regression baselines.
 2. You are running controlled experiments where architectural simplicity is preferred over best observed latency.
+
+When to prefer Ornith-1.0-35B-4bit:
+
+1. You want a 35B-class alternate path with slightly stronger matched decode throughput.
+2. You can accept higher peak memory and weaker matched prefill throughput than Qwen3.6-35B-A3B.
+3. You are validating whether real interactive quality or agent behavior offsets the memory cost in your own workload.
 
 Coding-quality disclaimer:
 
@@ -228,13 +284,15 @@ Coding-quality disclaimer:
 Suggested usage policy:
 
 1. Route normal coding-agent and long-context iterative sessions to 35B-A3B.
-2. Keep 27B as backup/canary and as a comparison baseline.
-3. Trigger soft alerts when peak memory approaches 48 GB, and stronger alerts near 52 GB.
-4. Avoid treating current crash-risk probability as calibrated; re-train after collecting more balanced recent crash events.
+2. Use Ornith as an alternate 35B-class route when decode throughput matters more than prefill efficiency and memory headroom is available.
+3. Keep 27B as backup/canary and as a comparison baseline.
+4. Trigger soft alerts when peak memory approaches 48 GB, and stronger alerts near 52 GB.
+5. Use the current crash-risk curve for monitoring and ranking, not hard policy enforcement.
+6. Re-train after collecting more balanced recent crash events and re-check temporal stability before promoting it beyond monitoring use.
 
 ## 8. What would make the risk model reliable
 
-To promote the risk model from directional to decision-grade:
+To promote the risk model from monitoring-grade to decision-grade:
 
 1. Capture a larger and more balanced set of recent crash/near-crash events.
 2. Add explicit restart/crash event IDs aligned to request timestamps (instead of proxy labels).
