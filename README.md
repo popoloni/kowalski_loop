@@ -1540,3 +1540,129 @@ Priority ordering still applies, so higher-priority tasks are presented first.
 - [TurboQuant MLX full](https://github.com/matt-k-wong/turboquant-mlx-full)
 - [TurboQuant Plus](https://github.com/TheTom/turboquant_plus)
 - [Headroom Compression](https://github.com/headroomlabs-ai/headroom)
+
+---
+
+## Evals wrappers (`bin/launch_llmstack_evals.bash` and `bin/plot_llmstack_comparison.bash`)
+
+These two wrappers standardize how you run llmstack benchmark batches and comparison plots from this repository root, always using the project virtualenv.
+
+### `bin/launch_llmstack_evals.bash`
+
+What it does:
+
+1. Validates that `env/` exists and uses `env/bin/python`.
+2. Activates the venv.
+3. Runs `local-coding-agent-evals/run_llmstack_eval_matrix.py`.
+4. Creates a timestamped output directory under `local-coding-agent-evals/results/` unless you override it.
+5. Passes any extra arguments through to the matrix runner.
+
+Default behavior:
+
+- Surface: `headroom`
+- Output dir: `local-coding-agent-evals/results/llmstack-matrix-<timestamp>`
+- Bench pack: speed-memory + hard-reasoning (agent pack optional)
+
+Usage examples:
+
+```bash
+# Default full matrix on headroom
+bash bin/launch_llmstack_evals.bash
+
+# Run only one model/backend pair
+bash bin/launch_llmstack_evals.bash \
+  --include-model dflash-qwen27b-dense \
+  --backend dflash
+
+# Inference surface + custom output dir + include agent pack
+bash bin/launch_llmstack_evals.bash \
+  --surface inference \
+  --output-dir local-coding-agent-evals/results/my-run \
+  --include-agent-pack
+```
+
+Wrapper options:
+
+- `--surface {headroom|inference}`
+- `--output-dir PATH`
+- `--include-agent-pack`
+- `-h, --help`
+
+Any other flags are forwarded to `run_llmstack_eval_matrix.py` (for example `--skip-speed`, `--skip-reasoning`, `--no-bypass-permissions`, `--include-model`, `--backend`).
+
+Agent problem pack across all backend/model combinations:
+
+- Yes, this is already supported by the same wrapper.
+- Use `--include-agent-pack` to enable it for each selected model key.
+- If you want to run only the agent problem pack (without speed/reasoning), combine it with `--skip-speed --skip-reasoning`.
+- A convenience alias wrapper is also available: `bin/launch_llmstack_agent_pack_matrix.bash`.
+
+Examples:
+
+```bash
+# Agent problem pack on all configured model/backend pairs
+bash bin/launch_llmstack_evals.bash \
+  --include-agent-pack
+
+# Agent problem pack only (skip other benchmark families)
+bash bin/launch_llmstack_evals.bash \
+  --include-agent-pack \
+  --skip-speed \
+  --skip-reasoning
+
+# Agent problem pack only for one backend subset
+bash bin/launch_llmstack_evals.bash \
+  --include-agent-pack \
+  --skip-speed \
+  --skip-reasoning \
+  --backend dflash
+
+# Same behavior via dedicated alias wrapper
+bash bin/launch_llmstack_agent_pack_matrix.bash
+
+# Alias wrapper with filters
+bash bin/launch_llmstack_agent_pack_matrix.bash \
+  --backend dflash \
+  --surface headroom
+```
+
+Where outputs go:
+
+- Matrix-level output root remains under `local-coding-agent-evals/results/...`.
+- Agent problem pack run artifacts are written by the headless runner under `local-coding-agent-evals/agent-problem-pack/runs/`.
+- Agent problem pack verification commands prefer `uv run pytest`; if `uv` is not available, they now fall back automatically to `python -m pytest`.
+
+### `bin/plot_llmstack_comparison.bash`
+
+What it does:
+
+1. Validates that `env/bin/python` exists.
+2. Activates the venv.
+3. Tries author-provided plotting scripts first (if present in known paths).
+4. Falls back to `local-coding-agent-evals/plot_llmstack_comparison.py` if none are found.
+5. Forwards all passed args to whichever plotting script is selected.
+
+Search order for author scripts:
+
+1. `local-coding-agent-evals/plot_comparison.py`
+2. `local-coding-agent-evals/scripts/plot_comparison.py`
+3. `local-coding-agent-evals/scripts/plot_results.py`
+4. `local-coding-agent-evals/speed-memory-benchmark/plot_results.py`
+5. `local-coding-agent-evals/hard-tool-reasoning-benchmark/plot_results.py`
+
+Usage examples:
+
+```bash
+# Generate comparison plot + markdown summary from latest results
+bash bin/plot_llmstack_comparison.bash
+
+# Explicit results root and output image
+bash bin/plot_llmstack_comparison.bash \
+  --results-root local-coding-agent-evals/results \
+  --output local-coding-agent-evals/results/llmstack_comparison.png \
+  --title "LLMStack Comparison"
+```
+
+Tip:
+
+- Typical flow is: run `launch_llmstack_evals.bash` first, then run `plot_llmstack_comparison.bash` on the generated results.

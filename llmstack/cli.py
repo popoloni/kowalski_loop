@@ -405,6 +405,8 @@ def run_interactive(config, args):
     ccr = CCRService()
     active_model, active_backend, _ = load_active_backend(config)
     active_target = active_backend.model_target()
+    active_provider = active_backend.provider_name()
+    ccr_route_model = f"{active_provider},{active_target}"
     timeout_ms = int(config["task_timeout"] * 1000)
     ccr.patch_timeout(timeout_ms)
     ccr.pretrust(config["dev_root"])
@@ -446,19 +448,21 @@ def run_interactive(config, args):
         "6. Never mix prose and tool calls in the same message."
     )
 
+    extra = args.extra or []
+    has_permission_override = any(t == "--permission-mode" or t.startswith("--permission-mode=") for t in extra)
     cmd = [
         "ccr", "code",
-        "--permission-mode", permission_mode,
         "--append-system-prompt", system_prompt,
         "--max-turns", str(max_turns),
     ]
+    if not has_permission_override:
+        cmd.extend(["--permission-mode", permission_mode])
 
     # Claude sessions can persist a model selection; force active target unless
     # caller explicitly provides --model.
-    extra = args.extra or []
     has_model_override = any(t == "--model" or t.startswith("--model=") for t in extra)
     if not has_model_override:
-        cmd.extend(["--model", active_target])
+        cmd.extend(["--model", ccr_route_model])
     cmd.extend(extra)
 
     subprocess.run(cmd, cwd=dev_root, env=env, check=True)

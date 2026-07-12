@@ -85,8 +85,11 @@ class CCRService(ServiceManager):
             active_provider = getattr(backend, "provider_name", lambda: active_provider)()
             active_target = getattr(backend, "model_target", lambda: active_target)()
 
+        existing_providers_raw = base.get("providers")
+        if not isinstance(existing_providers_raw, list):
+            existing_providers_raw = base.get("Providers", [])
         existing_providers = {
-            p.get("name"): p for p in base.get("Providers", []) if isinstance(p, dict) and p.get("name")
+            p.get("name"): p for p in existing_providers_raw if isinstance(p, dict) and p.get("name")
         }
 
         provider_models = {}
@@ -125,7 +128,10 @@ class CCRService(ServiceManager):
             providers.append(provider_cfg)
 
         route_target = f"{active_provider},{active_target}"
-        router = dict(base.get("Router", {}))
+        router_seed = base.get("router")
+        if not isinstance(router_seed, dict):
+            router_seed = base.get("Router", {})
+        router = dict(router_seed)
         for key in self._router_keys():
             router[key] = route_target
         router["longContextThreshold"] = router.get("longContextThreshold", 30000)
@@ -135,9 +141,12 @@ class CCRService(ServiceManager):
             "HOST": base.get("HOST", local_host),
             "NON_INTERACTIVE_MODE": base.get("NON_INTERACTIVE_MODE", True),
             "API_TIMEOUT_MS": timeout_ms,
-            "Providers": providers,
-            "Router": router,
+            "providers": providers,
+            "router": router,
         }
+        # Keep uppercase aliases for backward compatibility with any older readers.
+        rendered["Providers"] = providers
+        rendered["Router"] = router
 
         print(
             "🔧 [Kowalski] Rendered CCR multi-model config "
@@ -167,7 +176,9 @@ class CCRService(ServiceManager):
             return [str(exc)]
 
         expected_route = f"{active_provider},{active_target}"
-        providers = cfg.get("Providers", [])
+        providers = cfg.get("providers")
+        if not isinstance(providers, list):
+            providers = cfg.get("Providers", [])
         provider_models = {}
 
         for p in providers:
@@ -197,7 +208,9 @@ class CCRService(ServiceManager):
                     f"Missing model target '{target}' in provider '{provider_name}' models list"
                 )
 
-        router = cfg.get("Router", {})
+        router = cfg.get("router")
+        if not isinstance(router, dict):
+            router = cfg.get("Router", {})
         for key in self._router_keys():
             current = router.get(key)
             if current != expected_route:
@@ -222,7 +235,10 @@ class CCRService(ServiceManager):
     def patch_timeout(self, timeout_ms):
         cfg = self._load_config()
         cfg["API_TIMEOUT_MS"] = timeout_ms
-        for prov in cfg.get("Providers", []):
+        providers = cfg.get("providers")
+        if not isinstance(providers, list):
+            providers = cfg.get("Providers", [])
+        for prov in providers:
             prov["timeout"] = timeout_ms
         self._save_config(cfg)
         print(f"🔧 [Kowalski] CCR config timeout set to {timeout_ms} ms")
