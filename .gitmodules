@@ -1,0 +1,3 @@
+[submodule "local-coding-agent-evals"]
+	path = local-coding-agent-evals
+	url = https://github.com/rasbt/local-coding-agent-evals.git
