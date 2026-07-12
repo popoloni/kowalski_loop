@@ -15,10 +15,16 @@ logs/
 
 # Python cache
 __pycache__/
-.pytest_cache
+.pytest_cache/
 *.py[cod]
 *$py.class
 *.pyc
+*.pyo
+*.pyd
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
 *.egg-info/
 
 # macOS
