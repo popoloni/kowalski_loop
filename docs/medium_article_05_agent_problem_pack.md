@@ -196,6 +196,9 @@ Compare to baseline without prefix cache:
 
 This is not incremental. This is a **phase transition** from "tolerable" to "instant."
 
+![Time to First Token by Model](img/article5/ttft_by_model.png)
+*Figure 5: TTFT (Time to First Token) comparison. DFlash models (Ornith, Qwen) achieve 0.9–1.1s prefill vs 38.7s for MLX without cache—a 35× speedup that compounds across 10–12 turns per problem.*
+
 ### Memory: Fits 64 GB, Stays Stable
 
 Raschka's speed benchmark showed **25.5 GB MLX peak** for `dflash-ornith35b-moe` on single-turn generation.
@@ -206,6 +209,9 @@ Our Agent Pack shows **30.7 GB MLX peak** for the same model on multi-turn tasks
 - Multi-turn accumulates context: tool schemas, file contents, test outputs
 - Agent Pack loads full workspace state, not just a synthetic prompt
 - +20% memory is expected and acceptable (still fits 64 GB Mac Studio)
+
+![Token Distribution by Model](img/article5/tokens_by_model.png)
+*Figure 6: Token processing distribution across models. Ornith-35B (both DFlash and MLX) shows consistent token throughput across all 5 problems, demonstrating stable multi-turn performance without degradation.*
 
 ⚠️ **Critical finding:** Even under sustained multi-turn load, memory peaks stay **well below the 48 GB danger zone** identified in our [memory stability analysis](../MEMORY.md). This is production-safe.
 
@@ -343,6 +349,9 @@ Raschka's article established **feasibility**. Ours establishes **production rea
 | **Multi-Turn Stability** | Not measured | Stable over 10–12 turns | ✅ **Production-safe** |
 
 **Key insight:** Raschka's speed benchmark (single-turn) and Agent Pack (multi-turn) measure **different workloads**. The only directly comparable metric is **pass rate**, which matches exactly.
+
+![Reasoning Benchmark vs Agent Pack](img/article5/reasoning_vs_pack.png)
+*Figure 7: Visual comparison of Raschka's 3/5 reasoning baseline vs Kowalski's 5/5 Agent Pack results. Both Qwen3.6-35B and Ornith-1.0-35B achieve perfect scores with DFlash infrastructure, demonstrating the production readiness gap closed by multi-turn optimization.*
 
 **New metrics:** Our telemetry adds **cache hit rate, prefill time, multi-turn stability**, which are invisible in single-turn benchmarks but critical for agent reliability.
 
