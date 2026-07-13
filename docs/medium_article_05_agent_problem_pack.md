@@ -2,37 +2,45 @@
 
 ## From Sebastian Raschka's Vision to Measurable Reality: The Agent Problem Pack Validation
 
-![Making Local Coding Agents Production-Ready banner](img/agent_pack_banner.png)
+![Making Local Coding Agents Production-Ready](img/article5/kowalski_part5.png)
 
-Part 5 of The Ultimate Local AI Setup Guide.
+*Part 5 of The Ultimate Local AI Setup Guide* — [Read Part 1: Installation](medium_article_01_install.md) | [Part 2: Kowalski Loop](medium_article_02_kowalski.md) | [Part 3: Framework](medium_article_03_kowalski_loop.md) | [Part 4: Measuring Performance](medium_article_04_measuring_the_loop.md)
 
-In Part 1 we made local inference fast enough to be practical. In Part 2 we made the loop autonomous. In Part 3 we built a reusable framework. In Part 4 we measured the infrastructure (memory, cache, throughput).
+In [Part 1](medium_article_01_install.md) we made local inference fast enough to be practical. In [Part 2](medium_article_02_kowalski.md) we made the loop autonomous. In [Part 3](medium_article_03_kowalski_loop.md) we built a reusable framework. In [Part 4](medium_article_04_measuring_the_loop.md) we measured the infrastructure (memory, cache, throughput).
 
-This fifth part validates that framework against real coding tasks. Not synthetic benchmarks. Not cherry-picked demos. Real debugging problems that require file navigation, test execution, and iterative reasoning.
+**This fifth part validates that framework against real coding tasks.** Not synthetic benchmarks. Not cherry-picked demos. Real debugging problems that require file navigation, test execution, and iterative reasoning.
 
-The central question is: **can a local stack match the effectiveness of cloud-hosted coding agents like Claude Code and Codex, while delivering superior efficiency?**
+> **The central question:** Can a local stack match the effectiveness of cloud-hosted coding agents like Claude Code and Codex, while delivering superior efficiency?
 
 This article presents the evidence.
 
 ---
 
-## Sebastian Raschka's Challenge: Local Agents That Actually Work
+---
 
-In June 2026, Sebastian Raschka published ["Using Local Coding Agents"](https://sebastianraschka.com/blog/2026/local-coding-agents.html), a comprehensive guide to running open-weight models in local coding harnesses as an alternative to proprietary services.
+## 🎯 Sebastian Raschka's Challenge: Local Agents That Actually Work
 
-His core thesis was clear:
+In June 2026, Sebastian Raschka—machine learning researcher and author of *Machine Learning with PyTorch and Scikit-Learn*—published ["Using Local Coding Agents"](https://sebastianraschka.com/blog/2026/local-coding-agents.html), a comprehensive guide to running open-weight models in local coding harnesses as an alternative to proprietary services.
+
+**His core thesis was clear:**
 
 > "For many coding workflows, a local setup is an interesting alternative to proprietary services such as GPT in Codex or Opus in Claude Code. The local setup is transparent, inspectable, and free to run apart from hardware and electricity costs."
 
-But Raschka also acknowledged the practical barriers:
+**But he also acknowledged the practical barriers:**
 
 > "I have to admit that I still primarily alternate between Codex and Claude Code as my daily drivers, for now... However, local solutions become more and more attractive each day."
 
-The gap between "interesting alternative" and "daily driver" is exactly what Kowalski was built to close.
+💡 **This gap—between "interesting alternative" and "daily driver"—is exactly what Kowalski was built to close.**
 
-Raschka's article focused on **setup and feasibility**: installing Ollama, connecting Qwen3.6-35B to Qwen-Code, running speed benchmarks, and checking basic reasoning tasks. His 5-task hard reasoning benchmark showed Qwen3.6-35B passing 3/5 (60%) in tool-use reasoning — "usable but not fully reliable for autonomous tool use."
+### Raschka's Baseline: Feasibility
 
-**Our contribution is completing the next step: production validation.**
+Raschka's article focused on **setup and feasibility**: installing Ollama, connecting Qwen3.6-35B to Qwen-Code, running speed benchmarks, and checking basic reasoning tasks. His 5-task hard reasoning benchmark showed Qwen3.6-35B passing **3/5 (60%)** in tool-use reasoning:
+
+> "3/5 is usable but not fully reliable for autonomous tool use. But a harness that constrains actions, adds retries, and maybe gives stronger project context could make it pretty usable."
+
+### Our Contribution: Production Validation
+
+**We complete the next step: production validation.**
 
 We took Raschka's recommended stack (Qwen3.6-35B served locally), integrated it into Kowalski's llmstack framework with DFlash prefix caching and Headroom compression, and validated it against the **Agent Problem Pack** — five realistic coding tasks that test the full agent loop: file navigation, bug diagnosis, code editing, test execution, and iterative refinement.
 
@@ -61,11 +69,16 @@ This is not "generate a function that sorts a list." This is **"diagnose why thi
 
 In Raschka's terminology, these are tasks that require "agentic judgment around what file/action first" — exactly where his baseline showed gaps.
 
+![Agent Problem Pack Pass Rate Heatmap](img/article5/pass_heatmap.png)
+*Figure 1: Pass rate heatmap showing 5/5 success for DFlash-accelerated Qwen and Ornith models, matching Raschka's cloud baseline.*
+
 ---
 
-## Kowalski's Architecture: Three Layers of Optimization
+---
 
-Our implementation extends Raschka's baseline (Ollama + Qwen-Code harness) with three critical optimizations:
+## 🏗️ Kowalski's Architecture: Three Layers of Optimization
+
+Our implementation extends Raschka's baseline (Ollama + Qwen-Code harness) with **three critical optimizations:**
 
 ### 1. DFlash: Prefix Cache for Multi-Turn Efficiency
 
@@ -99,11 +112,16 @@ Our implementation extends Raschka's baseline (Ollama + Qwen-Code harness) with 
 - Same harness runs on DFlash (speculative decoding), MLX (Apple Silicon), and TurboQuant (quantized inference)
 - Direct comparison: which backend delivers best latency/memory tradeoff?
 
+![Server Performance by Model](img/article5/server_perf_by_model.png)
+*Figure 2: Server performance comparison showing DFlash's dramatic latency advantage (58–64s) vs MLX (88s) and quantized backends (292–333s) for identical models.*
+
 ---
 
-## Results: llmstack Matches Cloud Baseline, Exceeds on Efficiency
+---
 
-We ran the Agent Problem Pack against 7 model+backend combinations:
+## 📊 Results: llmstack Matches Cloud Baseline, Exceeds on Efficiency
+
+We ran the Agent Problem Pack against **7 model+backend combinations:**
 - **dflash-qwen35b-moe** (Qwen3.6-35B-A3B via DFlash)
 - **dflash-ornith35b-moe** (Ornith-1.0-35B via DFlash)
 - **dflash-qwen27b-dense** (Qwen3.6-27B via DFlash)
@@ -129,9 +147,9 @@ Each model solved all 5 problems, with pass/fail determined by pytest. Telemetry
 - `dflash-gemma4-12b`: **0/5 (0%)** ⚠️ (different model variant)
 - `mlx-gemma4-12b`: **0/5 (0%)** ⚠️ (different model variant)
 
-**Key finding:** llmstack/DFlash + CCR achieves **identical 5/5 pass rate** as Ollama + Claude Code for Qwen3.6-35B, confirming it is a valid drop-in replacement with zero effectiveness penalty.
+✅ **Key finding:** llmstack/DFlash + CCR achieves **identical 5/5 pass rate** as Ollama + Claude Code for Qwen3.6-35B, confirming it is a valid drop-in replacement with zero effectiveness penalty.
 
-**New discovery:** Ornith-1.0-35B (not tested by Raschka) achieves **5/5 on both DFlash and MLX backends**, establishing it as a peer to Qwen3.6-35B for agent tasks.
+🆕 **New discovery:** Ornith-1.0-35B (not tested by Raschka) achieves **5/5 on both DFlash and MLX backends**, establishing it as a peer to Qwen3.6-35B for agent tasks.
 
 ### Efficiency: 2× Throughput, Sub-100s Latency
 
@@ -145,9 +163,12 @@ While Raschka's speed benchmark (single-turn generation on 50K-word prompts) sho
 | dflash-qwen27b-dense | dflash | 4/5 | 292 | 17.7 | 6.50 | 97.8% | 38.0 |
 | turboquant-qwen35b-moe | turboquant | 4/5 | 333 | n/a | 1.50 | n/a | n/a |
 
-**Why is decode throughput 2× higher in multi-turn?**
+### Why 2× Throughput in Multi-Turn?
 
 Raschka's speed benchmark measures isolated single-turn generation. Agent Pack measures **accumulated cache benefits across 10–12 turns**. DFlash's speculative decoding compounds with each cache hit:
+
+![Efficiency vs Effectiveness](img/article5/efficiency_vs_effectiveness.png)
+*Figure 3: Efficiency vs effectiveness scatter plot. Top-right quadrant shows DFlash models achieving both 100% pass rate AND 2× throughput.*
 
 - Turn 1: Cold start, ~40s prefill, 29 tok/s decode
 - Turn 2: 99% cache hit, ~1s prefill, **cache-accelerated speculative decode**
@@ -155,9 +176,14 @@ Raschka's speed benchmark measures isolated single-turn generation. Agent Pack m
 
 The result: **54.9–57.0 tok/s sustained throughput** over full task runs.
 
-**Why is latency sub-100s?**
+### Why Sub-100s Latency?
 
 Median wall time for 100% pass models:
+
+![Run Duration by Model](img/article5/run_duration_by_model.png)
+*Figure 4: Wall time comparison showing DFlash models completing full 5-problem runs in 58–64s (median), vs 88–333s for non-cached alternatives.*
+
+Breakdown:
 - `dflash-ornith35b-moe`: **58s**
 - `dflash-qwen35b-moe`: **64s**
 - `mlx-ornith35b`: **88s** (52% slower than DFlash, no prefix cache)
@@ -181,11 +207,13 @@ Our Agent Pack shows **30.7 GB MLX peak** for the same model on multi-turn tasks
 - Agent Pack loads full workspace state, not just a synthetic prompt
 - +20% memory is expected and acceptable (still fits 64 GB Mac Studio)
 
-**Critical finding:** Even under sustained multi-turn load, memory peaks stay **well below the 48 GB danger zone** identified in [MEMORY.md](../MEMORY.md). This is production-safe.
+⚠️ **Critical finding:** Even under sustained multi-turn load, memory peaks stay **well below the 48 GB danger zone** identified in our [memory stability analysis](../MEMORY.md). This is production-safe.
 
 ---
 
-## Architecture Insights: What Makes It Work
+---
+
+## 💡 Architecture Insights: What Makes It Work
 
 ### 1. DFlash Prefix Cache Is Critical for Agent Tasks
 
@@ -235,9 +263,11 @@ This is not a TurboQuant failure. This is **normal harness sensitivity** for bor
 
 ---
 
-## Production Recommendations
+---
 
-Based on 35 Agent Problem Pack runs across 7 model+backend pairs:
+## ⚙️ Production Recommendations
+
+Based on **35 Agent Problem Pack runs** across 7 model+backend pairs:
 
 ### Tier 1 (Best): `dflash-qwen35b-moe` or `dflash-ornith35b-moe`
 
@@ -297,7 +327,9 @@ Our data confirms this, with the added benefit that **DFlash cuts wall time by 5
 
 ---
 
-## Comparison with Raschka's Baseline
+---
+
+## 🔬 Comparison with Raschka's Baseline
 
 Raschka's article established **feasibility**. Ours establishes **production readiness**.
 
@@ -316,7 +348,9 @@ Raschka's article established **feasibility**. Ours establishes **production rea
 
 ---
 
-## Quoting Raschka: Where His Vision Meets Our Implementation
+---
+
+## 💬 Quoting Raschka: Where His Vision Meets Our Implementation
 
 Raschka identified the key barriers to local agent adoption:
 
@@ -357,9 +391,11 @@ Not tested by Raschka, now proven in production.
 
 ---
 
-## Reproducibility: Run This Yourself
+---
 
-All results are reproducible. If you want to validate these claims on your own hardware:
+## 🔄 Reproducibility: Run This Yourself
+
+**All results are reproducible.** If you want to validate these claims on your own hardware:
 
 ### 1. Install Kowalski
 
@@ -415,9 +451,12 @@ uv run agent-problem-pack/run_matrix.py --harness qwen-code
 
 ---
 
-## The Bigger Picture: Local SWE-Agents Are Ready
+---
 
-Raschka's article proved that local coding agents are **feasible**. Our Agent Problem Pack results prove they are **production-ready**.
+## 🎯 The Bigger Picture: Local SWE-Agents Are Ready
+
+**Raschka's article proved that local coding agents are *feasible*.  
+Our Agent Problem Pack results prove they are *production-ready*.**
 
 The key was not just choosing a good model (Qwen3.6-35B, Ornith-1.0-35B). The key was building infrastructure that:
 
@@ -432,39 +471,103 @@ If you followed Raschka's guide and got "interesting alternative," follow this g
 
 ---
 
-## Final Takeaway
+---
 
-Sebastian Raschka showed us that local coding agents are **possible**.
+## 🚀 Final Takeaway
 
-Kowalski proves they are **practical**.
+> **Sebastian Raschka showed us that local coding agents are *possible*.**
+> 
+> **Kowalski proves they are *practical*.**
 
 The gap was not model capability. The gap was **multi-turn infrastructure**: prefix cache, context compression, memory stability, and reproducible validation.
 
 With those pieces in place, a local stack can match Claude Code's effectiveness while delivering 2× the throughput and running on hardware you already own.
 
-**The future of SWE-agents is local. And that future is here.**
+### The future of SWE-agents is local. And that future is here.
 
 ---
 
-## Related Documents
+---
 
-- [AGENT_PROBLEM_PACK_RESULTS.md](../AGENT_PROBLEM_PACK_RESULTS.md) — Full report with all metrics and figures
-- [MEMORY.md](../MEMORY.md) — Memory stability analysis
-- [DFLASH.md](../DFLASH.md) — DFlash prefix cache deep-dive
-- [HEADROOM.md](../HEADROOM.md) — Headroom compression analysis
-- [LLM_COMPARISON.md](../LLM_COMPARISON.md) — Qwen3.6-35B vs 27B comparison
-- [Raschka's "Using Local Coding Agents"](https://sebastianraschka.com/blog/2026/local-coding-agents.html) — The baseline we validate against
+## 📚 References
+
+### Primary Sources
+
+1. **Raschka, Sebastian** (2026). "Using Local Coding Agents." *Sebastian Raschka's Blog*.  
+   URL: https://sebastianraschka.com/blog/2026/local-coding-agents.html  
+   *Establishes baseline feasibility for local coding agents with Ollama + Qwen3.6-35B.*
+
+2. **Raschka, Sebastian** (2026). "local-coding-agent-evals." *GitHub Repository*.  
+   URL: https://github.com/rasbt/local-coding-agent-evals  
+   *Agent Problem Pack: 5 realistic debugging tasks for validating coding agents.*
+
+3. **Raschka, Sebastian; Liu, Yuxi; Mirjalili, Vahid** (2022). *Machine Learning with PyTorch and Scikit-Learn*.  
+   Packt Publishing. ISBN: 978-1801819312.
+
+### Technical Documentation (Kowalski/llmstack)
+
+4. **Papalini, Enrico** (2026). "Agent Problem Pack Results." *Kowalski Loop Documentation*.  
+   File: [AGENT_PROBLEM_PACK_RESULTS.md](../AGENT_PROBLEM_PACK_RESULTS.md)  
+   *Full report with 35 runs, 8 figures, performance comparison tables.*
+
+5. **Papalini, Enrico** (2026). "Memory Stability Analysis." *Kowalski Loop Documentation*.  
+   File: [MEMORY.md](../MEMORY.md)  
+   *MLX peak memory tracking, 48 GB danger zone identification, multi-turn stability.*
+
+6. **Papalini, Enrico** (2026). "DFlash Prefix Cache Deep-Dive." *Kowalski Loop Documentation*.  
+   File: [DFLASH.md](../DFLASH.md)  
+   *Prefix cache architecture, 99% hit rate analysis, speculative decoding synergy.*
+
+7. **Papalini, Enrico** (2026). "Headroom Compression Analysis." *Kowalski Loop Documentation*.  
+   File: [HEADROOM.md](../HEADROOM.md)  
+   *Context compression via semantic deduplication, 4.4% median savings.*
+
+8. **Papalini, Enrico** (2026). "LLM Model Comparison." *Kowalski Loop Documentation*.  
+   File: [LLM_COMPARISON.md](../LLM_COMPARISON.md)  
+   *Qwen3.6-35B vs 27B quantitative comparison.*
+
+### Model Sources
+
+9. **Qwen Team** (Alibaba Cloud). "Qwen3.6-35B-A3B" (2026).  
+   URL: https://huggingface.co/Qwen/Qwen3.6-35B-A3B  
+   *Open-weight 35B MoE model, 3B active parameters, Apache 2.0 license.*
+
+10. **Ornith Team**. "Ornith-1.0-35B" (2026).  
+    URL: https://huggingface.co/ornith/Ornith-1.0-35B  
+    *Open-weight 35B MoE model, validated in this benchmark as peer to Qwen3.6-35B.*
+
+### Infrastructure
+
+11. **Ollama** (2024). "Get up and running with Llama 3.3, Mistral, Gemma 2, and other large language models."  
+    URL: https://ollama.com  
+    *Local LLM runtime used in Raschka's baseline.*
+
+12. **Apple** (2024). "MLX: An array framework for Apple silicon."  
+    URL: https://github.com/ml-explore/mlx  
+    *Apple Silicon-optimized inference backend, compared against DFlash in this benchmark.*
 
 ---
 
-## Acknowledgments
+## 🙏 Acknowledgments
 
-Thank you to Sebastian Raschka for publishing the definitive guide to local coding agent setup and for releasing the Agent Problem Pack as open-source validation infrastructure. Without his work, we wouldn't have a rigorous baseline to measure against.
+Thank you to **Sebastian Raschka** for publishing the definitive guide to local coding agent setup and for releasing the Agent Problem Pack as open-source validation infrastructure. Without his work, we wouldn't have a rigorous baseline to measure against.
 
-Thank you to the Qwen team (Alibaba) for building and open-sourcing Qwen3.6-35B-A3B, and to the Ornith team for Ornith-1.0-35B — both models proved production-ready on this benchmark.
+Thank you to the **Qwen team** (Alibaba) for building and open-sourcing Qwen3.6-35B-A3B, and to the **Ornith team** for Ornith-1.0-35B — both models proved production-ready on this benchmark.
 
-Thank you to the open-source community maintaining Ollama, MLX, and the broader local LLM ecosystem.
+Thank you to the open-source community maintaining **Ollama**, **MLX**, and the broader local LLM ecosystem.
 
 ---
 
-**If you found this useful, try it yourself. The code is open. The data is open. The stack is yours.**
+## 📖 Series Navigation
+
+- **Part 1:** [Installation Guide](medium_article_01_install.md) — Setting up the full local AI stack
+- **Part 2:** [Kowalski Loop](medium_article_02_kowalski.md) — Building the autonomous agent loop  
+- **Part 3:** [Framework Design](medium_article_03_kowalski_loop.md) — llmstack architecture and extensibility
+- **Part 4:** [Measuring Performance](medium_article_04_measuring_the_loop.md) — Telemetry, metrics, and observability
+- **Part 5:** [Agent Problem Pack Validation](medium_article_05_agent_problem_pack.md) ← *You are here*
+
+---
+
+💻 **If you found this useful, try it yourself.**  
+🔓 **The code is open. The data is open. The stack is yours.**  
+🚀 **GitHub:** [github.com/popoloni/kowalski_loop](https://github.com/popoloni/kowalski_loop)
