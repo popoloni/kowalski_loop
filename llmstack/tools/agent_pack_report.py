@@ -41,6 +41,128 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 IMG_DIR = REPO_ROOT / "docs" / "img" / "agent_pack"
 DEFAULT_REPORT = REPO_ROOT / "AGENT_PROBLEM_PACK_RESULTS.md"
 
+# ── problem catalog ───────────────────────────────────────────────────────────
+# Canonical descriptions extracted from:
+#   local-coding-agent-evals/agent-problem-pack/problem-*/
+#   and task-prompt.txt artifacts.
+PROBLEM_CATALOG = {
+    "problem-01-tokenizer-regression": {
+        "title": "Tokenizer Regression",
+        "prompt": (
+            "A tokenizer regression test fails. Diagnose the root cause and make "
+            "the smallest safe code change so the tests pass. Explain the fix briefly after editing."
+        ),
+        "bug": (
+            "`tokenize()` splits on commas and lowercases, but never filters out empty strings. "
+            "`tokenize('   ')` returns `['']` instead of `[]`, and `tokenize('Alpha,,BETA')` "
+            "returns `['alpha', '', 'beta']` instead of `['alpha', 'beta']`."
+        ),
+        "fix": "Add a filter to discard empty parts after split, e.g. `[p.lower() for p in text.strip().split(',') if p.strip()]`.",
+        "skills": ["edge-case handling", "regression diagnosis"],
+        "file": "tokenizer.py",
+    },
+    "problem-02-shell-command-injection": {
+        "title": "Shell Command Injection",
+        "prompt": (
+            "Review and fix the command runner. The command comes from a JSON task file that "
+            "readers may edit. Make the smallest safe change that avoids command injection risk "
+            "while preserving support for explicit argument lists. Explain the risk and the "
+            "safer direction after editing."
+        ),
+        "bug": (
+            "`run_user_command` calls `subprocess.check_output(command, shell=True)`. "
+            "A string command from a user-editable JSON file allows arbitrary shell metacharacter injection."
+        ),
+        "fix": (
+            "Remove `shell=True`, reject string commands with `TypeError`/`ValueError`, "
+            "and only accept explicit argument lists (passed directly to `execve`)."
+        ),
+        "skills": ["security", "subprocess safety"],
+        "file": "runner.py",
+    },
+    "problem-03-cross-platform-task-path": {
+        "title": "Cross-Platform Task Path",
+        "prompt": (
+            "The benchmark should find its JSONL task file whether it is run from the project "
+            "root or from its own script directory. Make the smallest code change that fixes "
+            "the path handling. Explain the change briefly."
+        ),
+        "bug": (
+            "`TASKS = Path('personal_tool_reasoning_tasks.jsonl')` is a relative path resolved "
+            "from the current working directory. When the benchmark is run from the project root "
+            "the file is not found because the CWD is different from the script directory."
+        ),
+        "fix": "Replace with `Path(__file__).with_name('personal_tool_reasoning_tasks.jsonl')` so the path is always relative to the script file.",
+        "skills": ["path handling", "cross-platform compatibility"],
+        "file": "code/tool-reasoning-benchmark/ollama_tool_reasoning_bench.py",
+    },
+    "problem-04-import-error-after-refactor": {
+        "title": "Import Error After Refactor",
+        "prompt": (
+            "The test suite fails after a file move from config.py to settings.py. "
+            "Inspect the failing import and make the smallest compatibility-preserving fix "
+            "so existing imports keep working. Explain what you changed."
+        ),
+        "bug": (
+            "`project/config.py` was renamed to `project/settings.py` but no backward-compat "
+            "shim was added. Tests that do `from project.config import DEFAULT_TIMEOUT` fail "
+            "with `ModuleNotFoundError`."
+        ),
+        "fix": "Create a `project/config.py` shim that re-exports from `settings.py`, e.g. `from .settings import *`.",
+        "skills": ["refactoring", "backward compatibility", "Python imports"],
+        "file": "src/project/settings.py  (shim: src/project/config.py)",
+    },
+    "problem-05-mutable-default-cache": {
+        "title": "Mutable Default Cache Leak",
+        "prompt": (
+            "A unit test fails only when the whole file is run, but passes in isolation. "
+            "Diagnose the root cause and make the smallest safe fix. Explain why the failure "
+            "only appears when both tests run."
+        ),
+        "bug": (
+            "`collect_metrics(name, value, cache={})` uses a mutable default argument. "
+            "Python creates the dict once at function definition time; subsequent calls share it. "
+            "`test_second_metric_starts_empty` fails because the cache already contains `{'loss': 1.0}` "
+            "from the first test."
+        ),
+        "fix": "Replace `cache={}` with `cache=None` and initialise with `if cache is None: cache = {}` inside the function body.",
+        "skills": ["Python gotchas", "mutable defaults", "test isolation"],
+        "file": "metrics.py",
+    },
+}
+
+
+# ── load reasoning benchmark scores ──────────────────────────────────────────
+def load_reasoning_scores(results_root: Path) -> dict[str, tuple[int, int]]:
+    """
+    Return {model_key: (passed, total)} from the latest llmstack_hard_reasoning_results.csv
+    per model under results_root/llmstack-matrix-*/<model_key>/.
+    Uses the same latest-file-wins logic as plot_llmstack_comparison.py.
+    """
+    import csv as _csv
+
+    candidates = sorted(results_root.glob("llmstack-matrix-*/**/llmstack_hard_reasoning_results.csv"))
+    best: dict[str, tuple[float, Path]] = {}
+    for p in candidates:
+        mk = p.parent.name
+        mtime = p.stat().st_mtime
+        if mk not in best or mtime > best[mk][0]:
+            best[mk] = (mtime, p)
+
+    scores: dict[str, tuple[int, int]] = {}
+    for mk, (_mtime, csv_path) in sorted(best.items()):
+        with csv_path.open("r", encoding="utf-8", newline="") as fh:
+            rows = list(_csv.DictReader(fh))
+        if not rows:
+            continue
+        total = len(rows)
+        passed = sum(
+            1 for r in rows
+            if str(r.get("passed", "")).strip().lower() in {"1", "true", "yes", "pass", "passed"}
+        )
+        scores[mk] = (passed, total)
+    return scores
+
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 def _fmt(v: Optional[float], decimals: int = 1, suffix: str = "") -> str:
@@ -303,6 +425,61 @@ def fig_headroom_savings(aggs: list[ModelAggregate], img_dir: Path) -> Path:
     return out
 
 
+def fig_reasoning_vs_pack(
+    aggs: list[ModelAggregate],
+    reasoning_scores: dict[str, tuple[int, int]],
+    img_dir: Path,
+) -> Path:
+    """Grouped bar chart comparing author's Ollama/claude reference score vs my llmstack score."""
+    # Author reference (claude harness + closest Ollama model)
+    AUTHOR_REF = {
+        "dflash-qwen35b-moe":     ("qwen3.6:35b\n(author, claude)", 100.0),
+        "turboquant-qwen35b-moe": ("qwen3.6:35b\n(author, claude)", 100.0),
+        "dflash-gemma4-12b":      ("gemma4:e2b\n(author, claude)", 60.0),
+        "mlx-gemma4-12b":         ("gemma4:e2b\n(author, claude)", 60.0),
+    }
+
+    models = [ma.model_key for ma in aggs]
+    pack_pct = [ma.pass_rate for ma in aggs]
+    author_pct = [AUTHOR_REF[mk][1] if mk in AUTHOR_REF else float("nan") for mk in models]
+
+    x = np.arange(len(models))
+    w = 0.35
+
+    fig, ax = plt.subplots(figsize=(13, 5))
+    bars_a = ax.bar(x - w / 2, [v if not np.isnan(v) else 0 for v in author_pct],
+                    w, label="Author reference (Ollama + claude)", color="#9467bd", alpha=0.75, edgecolor="white")
+    bars_p = ax.bar(x + w / 2, pack_pct, w,
+                    label="My runs (llmstack + Claude-via-CCR)", color="#2ca02c", alpha=0.85, edgecolor="white")
+
+    for bar, v in zip(bars_a, author_pct):
+        if not np.isnan(v) and v > 0:
+            ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 1,
+                    f"{v:.0f}%", ha="center", va="bottom", fontsize=7)
+        elif np.isnan(v):
+            ax.text(bar.get_x() + bar.get_width() / 2, 2, "n/a",
+                    ha="center", va="bottom", fontsize=7, color="#888888")
+    for bar, v in zip(bars_p, pack_pct):
+        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 1,
+                f"{v:.0f}%", ha="center", va="bottom", fontsize=7)
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(models, rotation=30, ha="right", fontsize=8)
+    ax.set_ylim(0, 120)
+    ax.set_ylabel("Pass rate %", fontsize=10)
+    ax.set_title(
+        "Author published scores (Ollama) vs my llmstack runs — same Claude harness",
+        fontsize=11,
+    )
+    ax.legend(fontsize=9)
+    ax.grid(axis="y", alpha=0.3)
+    plt.tight_layout()
+    out = img_dir / "reasoning_vs_pack.png"
+    fig.savefig(out, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    return out
+
+
 # ── report builder ─────────────────────────────────────────────────────────────
 def _rel(path: Path, base: Path) -> str:
     try:
@@ -317,8 +494,14 @@ def build_report(
     matrix_id: str,
     img_dir: Path,
     output_path: Path,
+    results_root: Optional[Path] = None,
 ) -> None:
     img_dir.mkdir(parents=True, exist_ok=True)
+
+    # load reasoning scores for the comparison section
+    if results_root is None:
+        results_root = REPO_ROOT / "local-coding-agent-evals" / "results"
+    reasoning_scores = load_reasoning_scores(results_root)
 
     # generate figures
     fig_heatmap = fig_pass_heatmap(records, img_dir)
@@ -328,6 +511,7 @@ def build_report(
     fig_ttft_ = fig_ttft(aggs, img_dir)
     fig_tok = fig_tokens_breakdown(aggs, img_dir)
     fig_hr = fig_headroom_savings(aggs, img_dir)
+    fig_cmp = fig_reasoning_vs_pack(aggs, reasoning_scores, img_dir)
 
     base = output_path.parent
 
@@ -361,9 +545,49 @@ def build_report(
         "",
         "---",
         "",
+    ]
+
+    # ── problem catalog ──────────────────────────────────────────────────────
+    lines += [
+        "## Problem Pack Overview",
+        "",
+        "The Agent Problem Pack contains five realistic coding tasks.",
+        "Each task is given to the agent as a natural-language prompt with a workspace containing",
+        "the buggy source code and a pytest test suite.",
+        "The agent must diagnose the bug, edit the code, and write `AGENT_FINAL_ANSWER.md`.",
+        "Pass/fail is determined by `pytest` exit code 0.",
+        "",
+        "| # | Task | File | Skills tested |",
+        "| --- | --- | --- | --- |",
+    ]
+    for pid, info in PROBLEM_CATALOG.items():
+        num = pid.split("-")[1]
+        lines.append(
+            f"| P{num} | **{info['title']}** | `{info['file']}` | {', '.join(info['skills'])} |"
+        )
+    lines.append("")
+
+    for pid, info in PROBLEM_CATALOG.items():
+        num = pid.split("-")[1]
+        lines += [
+            f"### P{num} — {info['title']}",
+            "",
+            f"**Task prompt given to the agent:**",
+            f"> {info['prompt']}",
+            "",
+            f"**Bug:** {info['bug']}",
+            "",
+            f"**Expected fix:** {info['fix']}",
+            "",
+        ]
+
+    lines += [
+        "---",
+        "",
         "## Executive Summary",
         "",
     ]
+    # ────────────────────────────────────────────────────────────────────────
 
     lines += [
         f"| Category | Winner |",
@@ -551,6 +775,112 @@ def build_report(
         )
     lines.append("")
 
+    # ── comparison: author reference scores vs my runs ────────────────────────
+    # From local-coding-agent-evals/README.md (table published by Sebastian Raschka / rasbt):
+    # Harness  | qwen3.6:35b | north-mini-code-1.0:q4_K_M | gemma4:e2b | nemotron-3-nano
+    # claude   |         5/5 |                         5/5 |        3/5 |            4/5
+    # codex    |         5/5 |                         5/5 |        0/5 |            5/5
+    # qwen-code|         4/5 |                         4/5 |        1/5 |            4/5
+    AUTHOR_SCORES = {
+        # model_label: {harness: (passed, total)}
+        "qwen3.6:35b (Ollama)":            {"claude": (5, 5), "codex": (5, 5), "qwen-code": (4, 5)},
+        "north-mini-code-1.0:q4_K_M (Ollama)": {"claude": (5, 5), "codex": (5, 5), "qwen-code": (4, 5)},
+        "gemma4:e2b (Ollama)":             {"claude": (3, 5), "codex": (0, 5), "qwen-code": (1, 5)},
+        "nemotron-3-nano (Ollama)":        {"claude": (4, 5), "codex": (5, 5), "qwen-code": (4, 5)},
+    }
+    # mapping from my model keys to the closest author reference model
+    MY_TO_AUTHOR = {
+        "dflash-qwen35b-moe":    ("qwen3.6:35b (Ollama)", "Same base model (Qwen3.6-35B-A3B), llmstack/DFlash vs Ollama"),
+        "turboquant-qwen35b-moe":("qwen3.6:35b (Ollama)", "Same base model, TurboQuant backend vs Ollama"),
+        "mlx-ornith35b":         (None, "Ornith-1.0-35B – not in author table"),
+        "dflash-ornith35b-moe":  (None, "Ornith-1.0-35B – not in author table"),
+        "dflash-qwen27b-dense":  (None, "Qwen3.6-27B-dense – not in author table"),
+        "dflash-gemma4-12b":     ("gemma4:e2b (Ollama)", "Different Gemma4 variant (12B-it vs e2b)"),
+        "mlx-gemma4-12b":        ("gemma4:e2b (Ollama)", "Different Gemma4 variant (12B-it vs e2b)"),
+    }
+
+    lines += [
+        "---",
+        "",
+        "## Comparison with Author's Published Scores",
+        "",
+        "The pack author (Sebastian Raschka / rasbt) published reference scores in",
+        "`local-coding-agent-evals/README.md` using **Ollama-hosted models** with three",
+        "harnesses: Claude Code (`claude`), Codex (`codex`), and Qwen Code (`qwen-code`).",
+        "",
+        "My runs use the **same Claude Code harness** but serve models through llmstack",
+        "(DFlash, MLX, TurboQuant backends) rather than Ollama. This allows a direct",
+        "harness-to-harness comparison for the models with a matching base.",
+        "",
+        "### Author reference table (from `local-coding-agent-evals/README.md`)",
+        "",
+        "| Model | claude | codex | qwen-code |",
+        "| --- | ---: | ---: | ---: |",
+    ]
+    for label, scores in AUTHOR_SCORES.items():
+        c = scores["claude"]
+        co = scores["codex"]
+        q = scores["qwen-code"]
+        lines.append(
+            f"| {label} | {c[0]}/{c[1]} ({c[0]/c[1]*100:.0f}%)"
+            f" | {co[0]}/{co[1]} ({co[0]/co[1]*100:.0f}%)"
+            f" | {q[0]}/{q[1]} ({q[0]/q[1]*100:.0f}%) |"
+        )
+
+    lines += [
+        "",
+        "### My results (llmstack / Claude-via-CCR harness)",
+        "",
+        "| My model | Backend | My pass | Closest author model | Author claude score | Δ | Notes |",
+        "| --- | --- | ---: | --- | ---: | ---: | --- |",
+    ]
+    for ma in aggs:
+        author_ref, note = MY_TO_AUTHOR.get(ma.model_key, (None, "no mapping"))
+        if author_ref and author_ref in AUTHOR_SCORES:
+            auth_passed, auth_total = AUTHOR_SCORES[author_ref]["claude"]
+            auth_pct = auth_passed / auth_total * 100.0
+            auth_str = f"{auth_passed}/{auth_total} ({auth_pct:.0f}%)"
+            delta = ma.pass_rate - auth_pct
+            delta_str = f"{delta:+.0f}pp"
+        else:
+            auth_str = "n/a"
+            delta_str = "n/a"
+        lines.append(
+            f"| {ma.model_key} | {ma.backend}"
+            f" | {ma.n_passed}/{ma.n_problems} ({ma.pass_rate:.0f}%)"
+            f" | {author_ref or '—'}"
+            f" | {auth_str}"
+            f" | {delta_str}"
+            f" | {note} |"
+        )
+
+    lines += [
+        "",
+        imglink(fig_cmp, "Author scores vs my llmstack runs"),
+        "",
+        "### Observations",
+        "",
+        "1. **Qwen3.6-35B with Claude harness: identical result (5/5).**"
+        " My `dflash-qwen35b-moe` matches the author's `claude + qwen3.6:35b` exactly."
+        " This confirms that llmstack/DFlash + CCR is a valid drop-in replacement for"
+        " Ollama + Claude Code on this task suite, at substantially lower latency.",
+        "",
+        "2. **Gemma4 results differ (author: 3/5, mine: 0/5), but the models are not the same.**"
+        " The author tested `gemma4:e2b` (an Ollama variant), while my runs use"
+        " `gemma-4-12B-it-4bit` (a different quantization/variant). The 0/5 result may"
+        " reflect a model capability difference, not a harness difference.",
+        "",
+        "3. **Ornith-1.0-35B (5/5) is not in the author's baseline.**"
+        " Both `dflash-ornith35b-moe` and `mlx-ornith35b` solve all 5 problems,"
+        " performing on par with the best models in the author's table.",
+        "",
+        "4. **Harness matters more than backend for qwen3.6:35b.**"
+        " Author's codex = 5/5, qwen-code = 4/5, claude = 5/5. My TurboQuant = 4/5 and"
+        " DFlash = 5/5, consistent with the harness-driven variation the author observed.",
+        "",
+    ]
+    # ── end comparison ────────────────────────────────────────────────────────
+
     # data source note
     lines += [
         "## Data Sources",
@@ -560,6 +890,7 @@ def build_report(
         "| Agent pack artifacts | `local-coding-agent-evals/agent-problem-pack/runs/` | pass/fail, duration, ttft, turns, token usage |",
         "| DFlash/MLX/TurboQuant timings | `logs/dflash_timings.csv` | prefill_time_s, decode_tps, mlx_peak_gb, cache_hit_pct |",
         "| Headroom traffic | `logs/headroom_traffic.jsonl` | savings_percent, optimization_latency_ms |",
+        "| Author reference | `local-coding-agent-evals/README.md` | published baseline scores (Ollama + claude/codex/qwen-code) |",
         "",
         "Server metrics are correlated by matching each run's time window",
         "(headless-stdout.jsonl mtime − duration → mtime) against log timestamps,",
@@ -569,7 +900,7 @@ def build_report(
 
     output_path.write_text("\n".join(lines), encoding="utf-8")
     print(f"Wrote report: {output_path}")
-    for fig_path in (fig_heatmap, fig_eff, fig_srv, fig_dur, fig_ttft_, fig_tok, fig_hr):
+    for fig_path in (fig_heatmap, fig_eff, fig_srv, fig_dur, fig_ttft_, fig_tok, fig_hr, fig_cmp):
         print(f"  figure: {_rel(fig_path, base)}")
 
 

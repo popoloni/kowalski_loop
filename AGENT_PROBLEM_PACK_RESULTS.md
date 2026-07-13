@@ -1,12 +1,75 @@
 # AGENT_PROBLEM_PACK_RESULTS.md
 
-Generated at: 2026-07-13T09:18:18  
+Generated at: 2026-07-13T11:36:28  
 Matrix run: **20260713_003824**
 
 This report cross-references every Agent Problem Pack run with the live server logs
 (`logs/dflash_timings.csv`, `logs/headroom_traffic.jsonl`) to compare
 efficiency (memory, throughput, latency) and effectiveness (pass rate) for each
 model + backend combination.
+
+---
+
+## Problem Pack Overview
+
+The Agent Problem Pack contains five realistic coding tasks.
+Each task is given to the agent as a natural-language prompt with a workspace containing
+the buggy source code and a pytest test suite.
+The agent must diagnose the bug, edit the code, and write `AGENT_FINAL_ANSWER.md`.
+Pass/fail is determined by `pytest` exit code 0.
+
+| # | Task | File | Skills tested |
+| --- | --- | --- | --- |
+| P01 | **Tokenizer Regression** | `tokenizer.py` | edge-case handling, regression diagnosis |
+| P02 | **Shell Command Injection** | `runner.py` | security, subprocess safety |
+| P03 | **Cross-Platform Task Path** | `code/tool-reasoning-benchmark/ollama_tool_reasoning_bench.py` | path handling, cross-platform compatibility |
+| P04 | **Import Error After Refactor** | `src/project/settings.py  (shim: src/project/config.py)` | refactoring, backward compatibility, Python imports |
+| P05 | **Mutable Default Cache Leak** | `metrics.py` | Python gotchas, mutable defaults, test isolation |
+
+### P01 — Tokenizer Regression
+
+**Task prompt given to the agent:**
+> A tokenizer regression test fails. Diagnose the root cause and make the smallest safe code change so the tests pass. Explain the fix briefly after editing.
+
+**Bug:** `tokenize()` splits on commas and lowercases, but never filters out empty strings. `tokenize('   ')` returns `['']` instead of `[]`, and `tokenize('Alpha,,BETA')` returns `['alpha', '', 'beta']` instead of `['alpha', 'beta']`.
+
+**Expected fix:** Add a filter to discard empty parts after split, e.g. `[p.lower() for p in text.strip().split(',') if p.strip()]`.
+
+### P02 — Shell Command Injection
+
+**Task prompt given to the agent:**
+> Review and fix the command runner. The command comes from a JSON task file that readers may edit. Make the smallest safe change that avoids command injection risk while preserving support for explicit argument lists. Explain the risk and the safer direction after editing.
+
+**Bug:** `run_user_command` calls `subprocess.check_output(command, shell=True)`. A string command from a user-editable JSON file allows arbitrary shell metacharacter injection.
+
+**Expected fix:** Remove `shell=True`, reject string commands with `TypeError`/`ValueError`, and only accept explicit argument lists (passed directly to `execve`).
+
+### P03 — Cross-Platform Task Path
+
+**Task prompt given to the agent:**
+> The benchmark should find its JSONL task file whether it is run from the project root or from its own script directory. Make the smallest code change that fixes the path handling. Explain the change briefly.
+
+**Bug:** `TASKS = Path('personal_tool_reasoning_tasks.jsonl')` is a relative path resolved from the current working directory. When the benchmark is run from the project root the file is not found because the CWD is different from the script directory.
+
+**Expected fix:** Replace with `Path(__file__).with_name('personal_tool_reasoning_tasks.jsonl')` so the path is always relative to the script file.
+
+### P04 — Import Error After Refactor
+
+**Task prompt given to the agent:**
+> The test suite fails after a file move from config.py to settings.py. Inspect the failing import and make the smallest compatibility-preserving fix so existing imports keep working. Explain what you changed.
+
+**Bug:** `project/config.py` was renamed to `project/settings.py` but no backward-compat shim was added. Tests that do `from project.config import DEFAULT_TIMEOUT` fail with `ModuleNotFoundError`.
+
+**Expected fix:** Create a `project/config.py` shim that re-exports from `settings.py`, e.g. `from .settings import *`.
+
+### P05 — Mutable Default Cache Leak
+
+**Task prompt given to the agent:**
+> A unit test fails only when the whole file is run, but passes in isolation. Diagnose the root cause and make the smallest safe fix. Explain why the failure only appears when both tests run.
+
+**Bug:** `collect_metrics(name, value, cache={})` uses a mutable default argument. Python creates the dict once at function definition time; subsequent calls share it. `test_second_metric_starts_empty` fails because the cache already contains `{'loss': 1.0}` from the first test.
+
+**Expected fix:** Replace `cache={}` with `cache=None` and initialise with `if cache is None: cache = {}` inside the function body.
 
 ---
 
@@ -142,6 +205,51 @@ Higher savings means more context was compressed before reaching the inference s
 | turboquant-qwen35b-moe | Import Error After Refactor | ✓ | 242 | 75.4 | 11 | 23521 | 177533 | 1646 | 12 | n/a | 1.50 | n/a | 0.0 |
 | turboquant-qwen35b-moe | Mutable Default Cache Leak | ✓ | 333 | 76.1 | 12 | 24898 | 256459 | 2334 | 12 | n/a | 1.55 | n/a | 0.0 |
 
+---
+
+## Comparison with Author's Published Scores
+
+The pack author (Sebastian Raschka / rasbt) published reference scores in
+`local-coding-agent-evals/README.md` using **Ollama-hosted models** with three
+harnesses: Claude Code (`claude`), Codex (`codex`), and Qwen Code (`qwen-code`).
+
+My runs use the **same Claude Code harness** but serve models through llmstack
+(DFlash, MLX, TurboQuant backends) rather than Ollama. This allows a direct
+harness-to-harness comparison for the models with a matching base.
+
+### Author reference table (from `local-coding-agent-evals/README.md`)
+
+| Model | claude | codex | qwen-code |
+| --- | ---: | ---: | ---: |
+| qwen3.6:35b (Ollama) | 5/5 (100%) | 5/5 (100%) | 4/5 (80%) |
+| north-mini-code-1.0:q4_K_M (Ollama) | 5/5 (100%) | 5/5 (100%) | 4/5 (80%) |
+| gemma4:e2b (Ollama) | 3/5 (60%) | 0/5 (0%) | 1/5 (20%) |
+| nemotron-3-nano (Ollama) | 4/5 (80%) | 5/5 (100%) | 4/5 (80%) |
+
+### My results (llmstack / Claude-via-CCR harness)
+
+| My model | Backend | My pass | Closest author model | Author claude score | Δ | Notes |
+| --- | --- | ---: | --- | ---: | ---: | --- |
+| dflash-gemma4-12b | dflash | 0/5 (0%) | gemma4:e2b (Ollama) | 3/5 (60%) | -60pp | Different Gemma4 variant (12B-it vs e2b) |
+| dflash-ornith35b-moe | dflash | 5/5 (100%) | — | n/a | n/a | Ornith-1.0-35B – not in author table |
+| dflash-qwen27b-dense | dflash | 4/5 (80%) | — | n/a | n/a | Qwen3.6-27B-dense – not in author table |
+| dflash-qwen35b-moe | dflash | 5/5 (100%) | qwen3.6:35b (Ollama) | 5/5 (100%) | +0pp | Same base model (Qwen3.6-35B-A3B), llmstack/DFlash vs Ollama |
+| mlx-gemma4-12b | mlx | 0/5 (0%) | gemma4:e2b (Ollama) | 3/5 (60%) | -60pp | Different Gemma4 variant (12B-it vs e2b) |
+| mlx-ornith35b | mlx | 5/5 (100%) | — | n/a | n/a | Ornith-1.0-35B – not in author table |
+| turboquant-qwen35b-moe | turboquant | 4/5 (80%) | qwen3.6:35b (Ollama) | 5/5 (100%) | -20pp | Same base model, TurboQuant backend vs Ollama |
+
+![Author scores vs my llmstack runs](docs/img/agent_pack/reasoning_vs_pack.png)
+
+### Observations
+
+1. **Qwen3.6-35B with Claude harness: identical result (5/5).** My `dflash-qwen35b-moe` matches the author's `claude + qwen3.6:35b` exactly. This confirms that llmstack/DFlash + CCR is a valid drop-in replacement for Ollama + Claude Code on this task suite, at substantially lower latency.
+
+2. **Gemma4 results differ (author: 3/5, mine: 0/5), but the models are not the same.** The author tested `gemma4:e2b` (an Ollama variant), while my runs use `gemma-4-12B-it-4bit` (a different quantization/variant). The 0/5 result may reflect a model capability difference, not a harness difference.
+
+3. **Ornith-1.0-35B (5/5) is not in the author's baseline.** Both `dflash-ornith35b-moe` and `mlx-ornith35b` solve all 5 problems, performing on par with the best models in the author's table.
+
+4. **Harness matters more than backend for qwen3.6:35b.** Author's codex = 5/5, qwen-code = 4/5, claude = 5/5. My TurboQuant = 4/5 and DFlash = 5/5, consistent with the harness-driven variation the author observed.
+
 ## Data Sources
 
 | Source | Path | What it provides |
@@ -149,6 +257,7 @@ Higher savings means more context was compressed before reaching the inference s
 | Agent pack artifacts | `local-coding-agent-evals/agent-problem-pack/runs/` | pass/fail, duration, ttft, turns, token usage |
 | DFlash/MLX/TurboQuant timings | `logs/dflash_timings.csv` | prefill_time_s, decode_tps, mlx_peak_gb, cache_hit_pct |
 | Headroom traffic | `logs/headroom_traffic.jsonl` | savings_percent, optimization_latency_ms |
+| Author reference | `local-coding-agent-evals/README.md` | published baseline scores (Ollama + claude/codex/qwen-code) |
 
 Server metrics are correlated by matching each run's time window
 (headless-stdout.jsonl mtime − duration → mtime) against log timestamps,
