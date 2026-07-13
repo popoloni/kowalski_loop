@@ -199,12 +199,12 @@ The model can forget. The plan, the git history, and the verification output mus
 
 Not every task deserves a multi-turn coding agent — that assumption is *expensive* on local hardware.
 
-- **Direct mode**: one focused generation writes a known file, verification runs immediately. Cheap and fast for self-contained work.
+- **Direct mode**: one focused generation writes a known file, verification runs immediately. Lean and fast for self-contained work.
 - **Agent mode**: full Claude Code session for cross-file changes, targeted edits, debugging, integration.
 
 ![Figure 209 - Direct vs Agent mode](img/medium_article_03_pdf/figure_209_p12.png)
 
-Whole-file regeneration is a hidden context-growth mechanism: every unnecessary rewrite inflates prompt size, prefill cost, cache pressure, and truncation risk. A task-aware executor policy attacks all four at once.
+Whole-file regeneration is a hidden context-growth mechanism: every unnecessary rewrite inflates prompt size, prefill overhead, cache pressure, and truncation risk. A task-aware executor policy attacks all four at once.
 
 ---
 

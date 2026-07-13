@@ -32,7 +32,7 @@ This is a real data update, not a wording-only edit.
 
 Picture a late-night session: the assistant is still answering, the model is still online, and everything looks fine. Then a request suddenly takes minutes instead of seconds. A few turns later the backend restarts. From the outside it feels random. From the inside it is usually not random at all.
 
-Prompt context has grown. Cache reuse changed shape. Prefill cost exploded. Memory crossed a dangerous zone. Those are measurable transitions, not mysteries.
+Prompt context has grown. Cache reuse changed shape. Prefill overhead exploded. Memory crossed a dangerous zone. Those are measurable transitions, not mysteries.
 
 That is why metrics are not cosmetic in Kowalski. They are the operating system for decisions.
 
@@ -176,7 +176,7 @@ If this article had to collapse into one sentence, it would be this:
 
 Kowalski does not win because one model is fast or one optimization is clever. It wins when measurement closes the loop between behavior and decisions.
 
-That is the real lesson from this dataset: performance, reliability, and cost are not separate dashboards. They are one coupled system.
+That is the real lesson from this dataset: performance, reliability, and efficiency are not separate dashboards. They are one coupled system.
 
 When you treat them that way, local AI agents stop feeling fragile and start behaving like infrastructure.
 

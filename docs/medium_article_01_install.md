@@ -16,9 +16,9 @@ Press enter or click to view image in full size
 If you are used to the instantaneous speed of Anthropic’s cloud servers, building and tuning a local inference engine might feel like a lot of heavy lifting. However, running an agentic coding loop locally on Apple Silicon fundamentally changes how you interact with AI for software engineering.
 Here is a breakdown of why this approach matters, the realities of the trade-offs, and the hard data behind why we chose these specific architectures.
 Why Run Agentic AI Locally?
-The primary drivers for pulling an AI agent offline are privacy, cost, and availability.
+The primary drivers for pulling an AI agent offline are privacy, control, and availability.
 When you use Claude Code or Cursor connected to the cloud, your entire proprietary codebase, API keys accidentally left in .env files, and internal architectural decisions are packaged into a massive prompt and transmitted to external servers. For enterprise IP, defense, or strict NDA work, this is often a non-starter.
-Running a model on your Mac ensures absolute data sovereignty — your code never leaves your SSD. Additionally, because agentic loops fire dozens of automated sub-requests to read directories, lint files, and rewrite functions, the API token costs can spiral quickly. A local setup incurs zero recurring costs and works perfectly whether you are in an office or offline on a flight.
+Running a model on your Mac ensures absolute data sovereignty — your code never leaves your SSD. It also gives you predictable behavior for long agentic loops that fire dozens of automated sub-requests to read directories, lint files, and rewrite functions. A local setup works the same way whether you are in an office or offline on a flight.
 The Trade-offs: Pros and Cons
 While local models are incredibly capable, they are not a 1:1 replacement for flagship cloud models. It is crucial to set realistic expectations.
 Press enter or click to view image in full size

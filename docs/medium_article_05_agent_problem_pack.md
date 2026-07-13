@@ -24,7 +24,7 @@ In June 2026, Sebastian Raschka—machine learning researcher and author of *Mac
 
 **His core thesis was clear:**
 
-> "For many coding workflows, a local setup is an interesting alternative to proprietary services such as GPT in Codex or Opus in Claude Code. The local setup is transparent, inspectable, and free to run apart from hardware and electricity costs."
+> "For many coding workflows, a local setup is an interesting alternative to proprietary services such as GPT in Codex or Opus in Claude Code. The local setup is transparent, inspectable..."
 
 **But he also acknowledged the practical barriers:**
 
@@ -306,8 +306,6 @@ Based on **35 Agent Problem Pack runs** across 7 model+backend pairs:
 - 📈 98.4% cache hit rate
 - 🎯 **Best prefill efficiency:** 99.9 tok/s (matched A/B)
 
-**Cost:** ~$1.16 USD per 5-problem run (token-based pricing on cloud deployment)
-
 **Why it's the default:**
 - DFlash prefix cache eliminates prefill overhead (1.1s vs 39s)
 - Speculative decoding compounds with cache hits
@@ -331,8 +329,6 @@ Our data confirms this, with the added benefit that **DFlash cuts wall time by 5
 - 💾 30.7 GB observed in Agent Pack (but **+2 GB vs Qwen in matched A/B**)
 - 📈 99.4% cache hit rate
 
-**Cost:** ~$0.99 USD per 5-problem run
-
 **Why choose Ornith:**
 - **Slightly faster decode throughput** when generation dominates
 - **6s faster wall time** in Agent Pack (58s vs 64s)
@@ -346,15 +342,13 @@ Our data confirms this, with the added benefit that **DFlash cuts wall time by 5
 
 ### Tier 2 (Good): `dflash-qwen27b-dense` or `turboquant-qwen35b-moe`
 
-**Use when:** 80% pass rate acceptable, budget constrained
+**Use when:** 80% pass rate acceptable, lower memory/compute footprint preferred
 
 **Performance:**
 - 4/5 pass rate
 - 17.7 tok/s (dflash) or n/a (turboquant)
 - 292–333s median wall time
 - ~38 GB MLX peak (dflash only)
-
-**Cost:** ~$1.00–1.75 USD per 5-problem run
 
 **Trade-off:** Acceptable for non-critical tasks, but 5× slower than Tier 1 on wall time.
 
@@ -366,8 +360,6 @@ Our data confirms this, with the added benefit that **DFlash cuts wall time by 5
 - 5/5 pass rate
 - 88s median wall time (52% slower than DFlash equivalent)
 - No cache metrics (MLX doesn't expose them)
-
-**Cost:** ~$1.59 USD per 5-problem run
 
 **Trade-off:** Proves that even without DFlash, a capable model on MLX can achieve 100% pass rate. But latency penalty is significant.
 
@@ -426,7 +418,7 @@ Raschka's article established **feasibility**. Ours establishes **production rea
 
 Raschka identified the key barriers to local agent adoption:
 
-> "Local solutions become more and more attractive each day. One aspect is the costs. If you have the hardware, they are practically free to run. And then there's, of course, the privacy angle."
+> "Local solutions become more and more attractive each day... there's, of course, the privacy angle."
 
 **Kowalski's contribution:** We eliminate the remaining friction (latency, memory instability, multi-turn degradation) that kept local agents in the "interesting alternative" zone instead of "daily driver."
 

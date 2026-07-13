@@ -45,13 +45,13 @@ Claude Code  →  ccr (router)  →  Headroom proxy :8789  →  DFlash server :8
 | **ccr** | The Part 1 bridge — now pointed at Headroom (`:8789`) instead of DFlash directly. |
 | **Kowalski** | New. Lifecycle, planning, execution, verification, checkpoints, resume. |
 
-A key detail that matters for the case study later: Kowalski's **direct** executor talks to DFlash *directly* on `:8787` (no router, no Headroom), while the **agentic** executor goes the full Claude Code → ccr → Headroom → DFlash route. Two paths, two cost profiles.
+A key detail that matters for the case study later: Kowalski's **direct** executor talks to DFlash *directly* on `:8787` (no router, no Headroom), while the **agentic** executor goes the full Claude Code → ccr → Headroom → DFlash route. Two paths, two runtime profiles.
 
 ---
 
 ## Phase 1: Add Headroom, the compression proxy
 
-The hardest lesson of local agentic coding is that it's **prefill-bound** — you pay to re-read an 18,000–25,000-token prompt on *every single turn*, and speculative decoding doesn't touch that cost. The most direct lever is simple: **send fewer tokens.** Headroom is a proxy that rewrites the context in a code-aware way before it reaches the model.
+The hardest lesson of local agentic coding is that it's **prefill-bound** — you re-read an 18,000–25,000-token prompt on *every single turn*, and speculative decoding doesn't touch that overhead. The most direct lever is simple: **send fewer tokens.** Headroom is a proxy that rewrites the context in a code-aware way before it reaches the model.
 
 ### Step 1 — Create Headroom's own virtualenv
 
@@ -64,7 +64,7 @@ python3.13 -m venv ~/headroom-env
 
 ### Step 2 — Install Headroom
 
-The pip package is **`headroom-ai`** (not `headroom` — that one's unrelated, and getting this wrong cost me an evening):
+The pip package is **`headroom-ai`** (not `headroom` — that one's unrelated, and getting this wrong burned an evening):
 
 ```bash
 ~/headroom-env/bin/pip install -U pip headroom-ai
@@ -192,7 +192,7 @@ Every verified task becomes a git commit. Three behaviors make interruptions che
 - **WIP resume.** If the model times out but left **valid, parseable** progress, Kowalski makes a `WIP (resumable)` commit and re-runs the task with a prompt that says *"this file already contains partial work — continue it, don't restart."* Progress-preserving resumes have their own budget (`max_resumes = 8`) separate from hard-failure retries (`max_retries = 3`), so making slow progress never burns your retry allowance.
 - **Server-crash watchdog.** A health-check thread pings DFlash during every task; if the server dies mid-task, Kowalski restarts it and doesn't count it against any budget.
 
-The payoff: you can `Ctrl-C` Kowalski and re-launch it, and it picks up from the last verified commit. A timeout costs you minutes, not your session.
+The payoff: you can `Ctrl-C` Kowalski and re-launch it, and it picks up from the last verified commit. A timeout loses minutes, not your session.
 
 ---
 
@@ -274,7 +274,7 @@ Tasks 15, 16, and 17 (the `game.js` mechanics) each came back `finish=stop` in a
 
 ### The bad #1: the cache-miss cliff is brutal
 
-The same CSV shows the dark side. Every time the prefix diverged or got evicted, the cost was catastrophic. Cold re-prefills in the log (the rows where `cached_tokens` drops to 0):
+The same CSV shows the dark side. Every time the prefix diverged or got evicted, the latency penalty was catastrophic. Cold re-prefills in the log (the rows where `cached_tokens` drops to 0):
 
 | What happened | Prompt tokens | Prefill time |
 |---|---|---|
