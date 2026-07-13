@@ -472,26 +472,24 @@ bash INSTALL.md  # Follow platform-specific instructions
 ### 2. Run the Agent Problem Pack
 
 ```bash
-# Start DFlash server (or MLX/TurboQuant)
-bash bin/start_dflash_server.bash
+# Run the llmstack agent-pack matrix across model/backend pairs
+./bin/launch_llmstack_agent_pack_matrix.bash
 
-# Run the pack
-cd local-coding-agent-evals
-uv run agent-problem-pack/run_matrix.py --matrix kowalski-test
-
-# Wait 30–60 minutes (5 problems × 7 models)
+# Wait for the matrix to finish (5 problems × configured model/backend pairs)
 ```
 
 ### 3. Generate the Report
 
 ```bash
-cd ~/kowalski_loop
-env/bin/python llmstack/tools/agent_pack_report.py
+# Build comparison plots and regenerate AGENT_PROBLEM_PACK_RESULTS.md
+./bin/plot_llmstack_comparison.bash
 ```
 
 This produces:
 - `AGENT_PROBLEM_PACK_RESULTS.md` (full report with all tables)
 - `docs/img/agent_pack/*.png` (8 figures: heatmap, scatter, timings, etc.)
+
+The important detail is that `./bin/plot_llmstack_comparison.bash` now does both steps in one pass: it generates the comparison plots and then regenerates `AGENT_PROBLEM_PACK_RESULTS.md` via `llmstack/tools/agent_pack_report.py`.
 
 ### 4. Compare with Your Own Baseline
 

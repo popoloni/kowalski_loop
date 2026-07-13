@@ -1,6 +1,6 @@
 # AGENT_PROBLEM_PACK_RESULTS.md
 
-Generated at: 2026-07-13T13:01:01  
+Generated at: 2026-07-13T16:39:48  
 Matrix run: **20260713_003824**
 
 This report cross-references every Agent Problem Pack run with the live server logs

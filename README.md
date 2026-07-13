@@ -1641,6 +1641,7 @@ What it does:
 3. Tries author-provided plotting scripts first (if present in known paths).
 4. Falls back to `local-coding-agent-evals/plot_llmstack_comparison.py` if none are found.
 5. Forwards all passed args to whichever plotting script is selected.
+6. Regenerates `AGENT_PROBLEM_PACK_RESULTS.md` via `llmstack/tools/agent_pack_report.py` after plotting finishes.
 
 Search order for author scripts:
 
@@ -1666,3 +1667,11 @@ bash bin/plot_llmstack_comparison.bash \
 Tip:
 
 - Typical flow is: run `launch_llmstack_evals.bash` first, then run `plot_llmstack_comparison.bash` on the generated results.
+- If you are reproducing the Agent Problem Pack workflow specifically, the most direct pair is:
+
+```bash
+bash bin/launch_llmstack_agent_pack_matrix.bash
+bash bin/plot_llmstack_comparison.bash
+```
+
+- The second command now regenerates both `local-coding-agent-evals/results/llmstack_comparison.{png,md}` and the repo-root `AGENT_PROBLEM_PACK_RESULTS.md` in one pass.
