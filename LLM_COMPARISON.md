@@ -86,10 +86,10 @@ The table below shows the matched difference between Qwen 35B-A3B and Qwen 27B a
 
 | Outcome | Matched effect (Qwen3.6-35B-A3B-4bit - Qwen3.6-27B-4bit) | 95% CI | Conclusive? |
 |---|---:|---:|---:|
-| prefill_time_s | -23.30 s | [-27.93, -19.43] s | yes |
-| decode_time_s | -14.47 s | [-17.86, -11.52] s | yes |
-| mlx_peak_gb | -4.62 GB | [-5.11, -4.15] GB | yes |
-| Matched pairs | 1,126 | n/a | n/a |
+| prefill_time_s | -23.03 s | [-27.39, -18.99] s | yes |
+| decode_time_s | -14.19 s | [-17.00, -11.12] s | yes |
+| mlx_peak_gb | -4.63 GB | [-5.10, -4.15] GB | yes |
+| Matched pairs | 1,166 | n/a | n/a |
 
 <!-- LLM_AB_TABLE_END -->
 
@@ -101,10 +101,10 @@ The balance table checks whether the matching step made the two groups comparabl
 
 | Covariate | SMD before matching | SMD after matching |
 |---|---:|---:|
-| log_prompt | -0.109 | -0.004 |
-| cache_hit_pct | 0.038 | 0.044 |
-| log_uncached | 0.073 | 0.185 |
-| session_progress | -0.067 | -0.030 |
+| log_prompt | -0.101 | -0.007 |
+| cache_hit_pct | 0.033 | 0.043 |
+| log_uncached | 0.075 | 0.165 |
+| session_progress | -0.033 | -0.028 |
 
 <!-- LLM_BALANCE_TABLE_END -->
 
@@ -126,14 +126,14 @@ The raw numbers below are useful as a quick sanity check, but they can still be 
 
 | Model | decode_tps median | decode_tps p90 | prefill_real_tps median | prefill_real_tps p90 |
 |---|---:|---:|---:|---:|
-| Qwen3.6-35B-A3B-4bit | 40.9 | 74.9 | 99.9 | 372.3 |
-| Qwen3.6-27B-4bit | 13.3 | 18.0 | 35.4 | 77.4 |
+| Qwen3.6-35B-A3B-4bit | 41.9 | 77.6 | 102.2 | 380.5 |
+| Qwen3.6-27B-4bit | 13.4 | 18.2 | 36.4 | 77.4 |
 
 | Throughput metric | Matched effect (Qwen3.6-35B-A3B-4bit - Qwen3.6-27B-4bit) | 95% CI | Better when |
 |---|---:|---:|---|
-| decode_tps | 29.95 tokens/s | [28.90, 30.98] tokens/s | higher |
-| prefill_real_tps | 117.11 tokens/s | [110.81, 123.36] tokens/s | higher |
-| Matched pairs | 1,126 | n/a | n/a |
+| decode_tps | 30.49 tokens/s | [29.49, 31.54] tokens/s | higher |
+| prefill_real_tps | 119.20 tokens/s | [112.99, 125.97] tokens/s | higher |
+| Matched pairs | 1,166 | n/a | n/a |
 
 <!-- LLM_THROUGHPUT_TABLE_END -->
 
@@ -153,28 +153,28 @@ This additional matched A/B isolates the two 35B-class routes currently most rel
 
 | Outcome | Matched effect (Ornith-1.0-35B-4bit - Qwen3.6-35B-A3B-4bit) | 95% CI | Conclusive? |
 |---|---:|---:|---:|
-| prefill_time_s | -0.23 s | [-1.27, 0.63] s | no |
-| decode_time_s | -0.96 s | [-2.13, 0.14] s | no |
-| mlx_peak_gb | 2.01 GB | [1.61, 2.44] GB | yes |
-| Matched pairs | 1,055 | n/a | n/a |
+| prefill_time_s | -0.25 s | [-1.18, 0.43] s | no |
+| decode_time_s | -0.83 s | [-1.91, 0.19] s | no |
+| mlx_peak_gb | 1.91 GB | [1.52, 2.31] GB | yes |
+| Matched pairs | 1,127 | n/a | n/a |
 
 | Covariate | SMD before matching | SMD after matching |
 |---|---:|---:|
-| log_prompt | 0.550 | 0.016 |
-| cache_hit_pct | 0.278 | 0.001 |
-| log_uncached | -0.364 | -0.273 |
-| session_progress | 0.056 | -0.052 |
+| log_prompt | 0.530 | 0.007 |
+| cache_hit_pct | 0.266 | 0.005 |
+| log_uncached | -0.366 | -0.261 |
+| session_progress | 0.023 | -0.061 |
 
 | Model | decode_tps median | decode_tps p90 | prefill_real_tps median | prefill_real_tps p90 |
 |---|---:|---:|---:|---:|
-| Ornith-1.0-35B-4bit | 42.6 | 64.2 | 45.6 | 295.1 |
-| Qwen3.6-35B-A3B-4bit | 40.9 | 74.9 | 99.9 | 372.3 |
+| Ornith-1.0-35B-4bit | 42.7 | 64.3 | 46.4 | 297.9 |
+| Qwen3.6-35B-A3B-4bit | 41.9 | 77.6 | 102.2 | 380.5 |
 
 | Throughput metric | Matched effect (Ornith-1.0-35B-4bit - Qwen3.6-35B-A3B-4bit) | 95% CI | Better when |
 |---|---:|---:|---|
-| decode_tps | 2.96 tokens/s | [1.57, 4.40] tokens/s | higher |
-| prefill_real_tps | -18.58 tokens/s | [-21.98, -15.16] tokens/s | higher |
-| Matched pairs | 1,055 | n/a | n/a |
+| decode_tps | 2.20 tokens/s | [0.83, 3.53] tokens/s | higher |
+| prefill_real_tps | -18.91 tokens/s | [-22.26, -15.43] tokens/s | higher |
+| Matched pairs | 1,127 | n/a | n/a |
 
 The Ornith-vs-Qwen35 comparison is only partially conclusive in this matched slice.
 
@@ -202,25 +202,25 @@ The most important practical use of this chart is thresholding and alerting. It 
 
 | Item | Value |
 |---|---:|
-| Risk label used | near-crash-window |
-| Positive events | 219 |
-| Positive prevalence | 3.08% |
-| Temporal split cutoff | 2026-07-12 07:27:18 UTC |
-| Temporal train rows | 5,693 |
-| Temporal test rows | 1,424 |
-| Temporal train prevalence | 3.28% |
-| Temporal test prevalence | 2.25% |
-| Temporal train AUC | 0.349 |
-| Temporal test AUC | 0.931 |
-| Temporal train Brier | 0.0329 |
-| Temporal test Brier | 0.0209 |
-| Temporal reliability | acceptable |
-| Coef: mlx_peak_gb | -0.076 |
-| Coef: log_prompt | -0.108 |
-| Coef: log_uncached | 0.059 |
-| Coef: prefill_tail | -0.014 |
-| Coef: model_is_qwen35 | 0.107 |
-| Coef: model_is_ornith35 | 0.001 |
+| Risk label used | high-risk-proxy(mlx_peak_gb>=48) |
+| Positive events | 233 |
+| Positive prevalence | 3.18% |
+| Temporal split cutoff | 2026-07-12 07:46:19 UTC |
+| Temporal train rows | 5,862 |
+| Temporal test rows | 1,466 |
+| Temporal train prevalence | 3.97% |
+| Temporal test prevalence | 0.00% |
+| Temporal train AUC | 0.467 |
+| Temporal test AUC | n/a |
+| Temporal train Brier | 0.0393 |
+| Temporal test Brier | 0.0026 |
+| Temporal reliability | low (temporal split unstable) |
+| Coef: mlx_peak_gb | -0.007 |
+| Coef: log_prompt | -0.539 |
+| Coef: log_uncached | -0.080 |
+| Coef: prefill_tail | 0.016 |
+| Coef: model_is_qwen35 | -0.047 |
+| Coef: model_is_ornith35 | -0.336 |
 
 <!-- LLM_RISK_TABLE_END -->
 
@@ -234,7 +234,7 @@ This plot shows how the risk score changes as peak memory increases for Qwen3.6-
 
 <!-- LLM_MODEL_NOTE_START -->
 
-Matched A/B effects are statistically conclusive for all tracked outcomes under this observational design. Crash-risk temporal validation is acceptable for monitoring use in the current three-model sample.
+Matched A/B effects are statistically conclusive for all tracked outcomes under this observational design. Crash-risk temporal validation is non-conclusive (low event prevalence and/or weak test discrimination).
 
 <!-- LLM_MODEL_NOTE_END -->
 

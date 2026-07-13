@@ -152,9 +152,9 @@ Each model solved all 5 problems, with pass/fail determined by pytest. Telemetry
 🆕 **New discovery:** Ornith-1.0-35B (not tested by Raschka) achieves **5/5 on both DFlash and MLX backends**, establishing it as a peer to Qwen3.6-35B for agent tasks.
 
 **Ornith vs Qwen tradeoffs** (from matched A/B analysis on production traffic):
-- **Memory:** Ornith carries **+2.0 GB** higher peak than Qwen3.6-35B under matched workload (30.7 vs 37.2 GB observed in Agent Pack)
-- **Decode throughput:** Ornith shows **+3.0 tok/s** advantage in matched decode (42.6 vs 40.9 tok/s median)
-- **Prefill throughput:** Qwen3.6-35B leads by **~18 tok/s** in matched prefill efficiency
+- **Memory:** Ornith carries **+1.9 GB** higher peak than Qwen3.6-35B under matched workload
+- **Decode throughput:** Ornith shows **+2.2 tok/s** advantage in matched decode (42.7 vs 41.9 tok/s median)
+- **Prefill throughput:** Qwen3.6-35B leads by **~19 tok/s** in matched prefill efficiency
 - **Latency:** Wall time differences are minimal and non-conclusive in matched comparison
 
 ### Efficiency: 2× Throughput, Sub-100s Latency
@@ -221,12 +221,13 @@ Our Agent Pack shows **30.7 GB MLX peak** for the same model on multi-turn tasks
 
 ⚠️ **Critical finding:** Even under sustained multi-turn load, memory peaks stay **well below the 48 GB danger zone** identified in our [memory stability analysis](../MEMORY.md). This is production-safe.
 
-**Memory threshold guidance** (from crash-risk modeling on 7,117 production requests):
+**Memory threshold guidance** (from crash-risk modeling on 7,328 production requests):
 - **Safe zone:** < 48 GB peak — normal operation, no alerts
 - **Warning zone:** 48–52 GB peak — soft alerts, monitor closely
 - **Danger zone:** > 52 GB peak — hard alerts, potential instability
-- **Observed peaks:** Qwen3.6-35B (37.2 GB), Ornith-35B (30.7 GB in Agent Pack, 39–40 GB in matched A/B), Qwen-27B (38.0 GB)
+- **Observed peaks:** Qwen3.6-35B (37.2 GB), Ornith-35B (30.7 GB in Agent Pack, ~39 GB in matched A/B), Qwen-27B (38.0 GB)
 - **Conclusion:** All tested models stay within safe zone with 10+ GB headroom on 64 GB machines
+- **Caveat:** The underlying crash-risk logistic model is currently **monitoring-grade, not decision-grade** — the latest temporal validation run shows low reliability (unstable split, near-zero test-set positives), so treat the 48/52 GB lines as engineering heuristics rather than a calibrated probability guarantee (see [LLM_COMPARISON.md §5](../LLM_COMPARISON.md) for the full caveat).
 
 ---
 
@@ -270,10 +271,10 @@ Both `dflash-gemma4-12b` and `mlx-gemma4-12b` failed all 5 problems (0/5), while
 
 **Corollary:** Focus on proven models first (Qwen3.6-35B, Ornith-1.0-35B), then optimize backend for latency/memory.
 
-**Quantitative validation:** These observations are backed by **matched A/B analysis on 7,117 production requests** ([LLM_COMPARISON.md](../LLM_COMPARISON.md)), which controls for workload mix by pairing similar requests across models. Key findings:
-- **Qwen3.6-35B vs 27B:** 35B shows **−23.3s prefill**, **−14.5s decode**, **−4.6 GB memory** (all conclusive)
-- **Ornith vs Qwen3.6-35B:** +2.0 GB memory, +3.0 tok/s decode, −18 tok/s prefill (mixed tradeoffs)
-- **Crash-risk model:** 48 GB soft threshold, 52 GB hard threshold, all tested configs stay safe
+**Quantitative validation:** These observations are backed by **matched A/B analysis on 7,328 production requests** ([LLM_COMPARISON.md](../LLM_COMPARISON.md)), which controls for workload mix by pairing similar requests across models. Key findings:
+- **Qwen3.6-35B vs 27B:** 35B shows **−23.0s prefill**, **−14.2s decode**, **−4.6 GB memory** (all conclusive)
+- **Ornith vs Qwen3.6-35B:** +1.9 GB memory, +2.2 tok/s decode, −18.9 tok/s prefill (mixed tradeoffs, partially conclusive)
+- **Crash-risk model:** 48 GB soft / 52 GB hard thresholds are useful engineering heuristics, but the latest temporal validation is non-conclusive — treat it as a monitoring signal, not a proven guarantee
 
 ### 5. Harness Variations Are Expected, Not Failures
 
@@ -595,7 +596,7 @@ With those pieces in place, a local stack can match Claude Code's effectiveness 
 
 8. **Papalini, Enrico** (2026). "LLM Model Comparison — Matched A/B and Crash-Risk Modeling." *Kowalski Loop Documentation*.  
    File: [LLM_COMPARISON.md](../LLM_COMPARISON.md)  
-   *Matched A/B analysis on 7,117 production requests comparing Qwen3.6-35B, Qwen3.6-27B, and Ornith-1.0-35B. Includes latency/memory/throughput tradeoffs, crash-risk logistic model with 48-52 GB threshold validation, and production routing policy. Validates that Qwen3.6-35B-A3B is optimal default (−23.3s prefill, −4.6 GB memory vs 27B), while Ornith-1.0-35B is strong decode-focused alternate (+3 tok/s decode, +2 GB memory vs Qwen35).*
+   *Matched A/B analysis on 7,328 production requests comparing Qwen3.6-35B, Qwen3.6-27B, and Ornith-1.0-35B. Includes latency/memory/throughput tradeoffs and a crash-risk logistic model with 48–52 GB threshold heuristics (currently monitoring-grade; latest temporal validation is non-conclusive). Validates that Qwen3.6-35B-A3B is optimal default (−23.0s prefill, −4.6 GB memory vs 27B), while Ornith-1.0-35B is a strong decode-focused alternate (+2.2 tok/s decode, +1.9 GB memory vs Qwen35).*
 
 ### Model Sources
 
