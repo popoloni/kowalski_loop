@@ -1,6 +1,6 @@
 # Making Local Coding Agents Production-Ready
 
-## From Sebastian Raschka's Vision to Measurable Reality: The Agent Problem Pack Validation
+## From Feasibility to Production: Validating Local Coding Agents with the Agent Problem Pack
 
 ![Making Local Coding Agents Production-Ready](img/article5/kowalski_part5.png)
 

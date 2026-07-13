@@ -236,6 +236,18 @@ def fig_efficiency_vs_effectiveness(aggs: list[ModelAggregate], img_dir: Path) -
     """Scatter: decode_tps (efficiency) vs pass_rate (effectiveness), bubble = mlx_peak."""
     fig, ax = plt.subplots(figsize=(9, 6))
     backends = {ma.backend for ma in aggs}
+    points: list[tuple[float, float]] = []
+
+    # Candidate text offsets (in points) used to reduce label collisions
+    # when models are close in (decode_tps, pass_rate) space.
+    offset_candidates = [
+        (10, 10),
+        (10, -14),
+        (-78, 10),
+        (-78, -14),
+        (12, 24),
+        (-82, 24),
+    ]
 
     for ma in aggs:
         x = ma.decode_tps_median
@@ -245,18 +257,33 @@ def fig_efficiency_vs_effectiveness(aggs: list[ModelAggregate], img_dir: Path) -
         size = (ma.mlx_peak_median_gb or 30.0) * 15
         color = _bar_colors([ma.model_key])[0]
         ax.scatter(x, y, s=size, color=color, alpha=0.75, edgecolors="black", linewidths=0.8)
+
+        # Count already-plotted neighboring points and rotate label offset accordingly.
+        neighbors = sum(1 for px, py in points if abs(px - x) < 3.0 and abs(py - y) < 6.0)
+        dx, dy = offset_candidates[neighbors % len(offset_candidates)]
+        ha = "left" if dx >= 0 else "right"
+
         ax.annotate(
             ma.model_key,
             (x, y),
             textcoords="offset points",
-            xytext=(6, 4),
+            xytext=(dx, dy),
             fontsize=7,
+            ha=ha,
+            va="center",
+            bbox={"boxstyle": "round,pad=0.15", "fc": "white", "ec": "none", "alpha": 0.75},
+            arrowprops={"arrowstyle": "-", "color": "#666666", "lw": 0.6, "alpha": 0.8},
         )
+        points.append((x, y))
 
     ax.set_xlabel("Decode throughput — median tok/s  (higher = more efficient)", fontsize=10)
     ax.set_ylabel("Pass rate %  (higher = more effective)", fontsize=10)
     ax.set_title("Efficiency vs Effectiveness — bubble size ∝ median MLX peak GB", fontsize=11)
     ax.set_ylim(-5, 110)
+    # Keep extra room on the right so top-right labels are readable.
+    xs = [ma.decode_tps_median or 0.0 for ma in aggs]
+    if xs:
+        ax.set_xlim(min(xs) - 2.8, max(xs) + 5.0)
     ax.axhline(100, color="#888888", linestyle="--", linewidth=0.8, alpha=0.6)
     ax.grid(True, alpha=0.3)
     ax.legend(handles=_legend_patches(backends), title="Backend", fontsize=8)
