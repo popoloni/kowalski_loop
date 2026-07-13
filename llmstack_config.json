@@ -35,7 +35,7 @@
   "mlx_stability_overrides": {},
   "turboquant_stability_profile": null,
   "turboquant_stability_overrides": {},
-  "active_model": "turboquant-qwen35b-moe",
+  "active_model": "dflash-qwen35b-moe",
   "models": {
     "dflash-qwen27b-dense": {
       "type": "dflash",
