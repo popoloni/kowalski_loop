@@ -128,21 +128,86 @@ Supported starter templates:
 |------|------|---------|
 | Explore and debug interactively | **Interactive (attended)** | `bin/launch_ccr.bash` or `python -m llmstack.cli interactive` |
 | Automate a build plan with verification | **Kowalski (unattended)** | `bin/launch_kowalski.bash` or `python -m llmstack.cli run` |
+| Use GitHub Copilot with a local model | **LLM Gateway** | Install "GitHub Copilot LLM Gateway" extension, point at `http://localhost:8789/v1` |
 
 To monitor real-time metrics, run `bin/launch_dashboard.bash` or `python -m llmstack.cli dashboard` in another terminal.
+
+### 4. Use Kowalski as your local model in GitHub Copilot
+
+Point the **GitHub Copilot LLM Gateway** extension at your local Headroom proxy so that **every** GitHub Copilot chat, inline completion, and agent session in VS Code uses your local quantized model instead of the cloud.
+
+#### Prerequisites
+
+- GitHub Copilot extension for VS Code installed.
+- [**GitHub Copilot LLM Gateway**](https://marketplace.visualstudio.com/items?itemName=abutson.github-copilot-llm-gateway) extension by Andrew Butson installed (`abutson.github-copilot-llm-gateway`).
+- [***Copilot Auto-Retry***](https://marketplace.visualstudio.com/items?itemName=abutson.copilot-auto-retry) extension installed (`abutson.copilot-auto-retry`) — optional but recommended for stability.
+
+#### Setup steps
+
+1. **Start the inference server** (choose one backend):
+
+   ```bash
+   # DFlash (recommended for Qwen models)
+   bash bin/start_dflash_server.bash
+
+   # or MLX (Gemma)
+   bash bin/start_mlx_server.bash
+
+   # or TurboQuant (Qwen MoE)
+   bash bin/start_turboquant_server.bash
+   ```
+
+2. **Start the Headroom compression proxy** (provides the OpenAI-compatible API endpoint):
+
+   ```bash
+   bash bin/start_headroom_server.bash
+   ```
+
+   Headroom listens on `headroom_port` (default `:8789`) and proxies to the inference backend on `inference_port` (default `:8787`).
+
+3. **(Optional) Start the monitoring dashboard** in a separate terminal:
+
+   ```bash
+   bash bin/launch_dashboard.bash
+   ```
+
+   Shows live TPS, cache hits, memory, and request counts.
+
+4. **Configure the LLM Gateway extension** in VS Code:
+
+   Open VS Code Settings (`⌘+,`), search for **`GitHub › Copilot › Llm-gateway: Server Url`**, and set it to:
+
+   ```
+   http://localhost:8789/v1
+   ```
+
+   This points GitHub Copilot at your local Headroom proxy. All Copilot requests — chat, inline completions, and agent sessions — are now served by your local model.
+
+#### What you get
+
+- **Full privacy**: no data leaves your machine.
+- **Unlimited usage**: no rate limits, no API costs.
+- **Context compression**: Headroom keeps large projects within your model's context window.
+- **Same Copilot experience**: all existing Copilot features (chat, inline suggestions, agent mode) work unchanged — they just use your local model.
+
+---
 
 ### Reading path (progressively deeper)
 
 1. [Quick Start](#-quick-start) — you are here.
 2. [Operating the Stack](#operating-the-stack) — wrappers vs direct CLI, stability levels.
 3. [How to Run](#how-to-run) — step-by-step walkthroughs for both modes.
-4. [Model Configuration](#model-configuration) — model/backend switching and stability presets in depth.
-5. [MEMORY.md](MEMORY.md) — RAM-tier sizing, model trade-offs, and stability guardrails.
-6. [HEADROOM.md](HEADROOM.md) — context compression efficiency, savings thresholds, and session-scale analysis.
-7. [DFLASH.md](DFLASH.md) — speculative decoding efficiency, cache thresholds, and prefill gain analysis.
-8. [SAVINGS.md](SAVINGS.md) — cross-layer synthesis of memory pressure, prompt compression, and cache reuse.
-9. [LLM_COMPARISON.md](LLM_COMPARISON.md) — Qwen-only A/B comparison, throughput, and crash-risk analysis.
-10. Advanced references — [Kowalski Configuration](#advanced-reference-kowalski-configuration-llmstack_configjson), [Task Schema](#advanced-reference-task-schema-plan-json), [Executor Selection](#advanced-reference-executor-selection), [Loop Modes](#loop-modes).
+4. [Power Management & TCO](#power-management--tc-analysis) — energy monitoring, battery, thermal throttling, TCO charts.
+5. [Benchmarks & Evals](#benchmarks--evals) — running the benchmark matrix and generating comparison plots.
+6. [Model Configuration](#model-configuration) — model/backend switching and stability presets in depth.
+7. [GitHub Copilot with Local Models](#4-use-kowalski-as-your-local-model-in-github-copilot) — use your local model as the backend for the GitHub Copilot VS Code extension.
+8. [POWER MONITORING](#power-monitoring) — energy/TCO treatment: power sampling, battery monitor, thermal throttling, break-even analysis. Requires `enable_power_sampling: true` in `llmstack_config.json`.
+9. [MEMORY.md](MEMORY.md) — RAM-tier sizing, model trade-offs, and stability guardrails.
+10. [HEADROOM.md](HEADROOM.md) — context compression efficiency, savings thresholds, and session-scale analysis.
+11. [DFLASH.md](DFLASH.md) — speculative decoding efficiency, cache thresholds, and prefill gain analysis.
+12. [SAVINGS.md](SAVINGS.md) — cross-layer synthesis of memory pressure, prompt compression, and cache reuse.
+13. [LLM_COMPARISON.md](LLM_COMPARISON.md) — Qwen-only A/B comparison, throughput, and crash-risk analysis.
+11. Advanced references — [Kowalski Configuration](#advanced-reference-kowalski-configuration-llmstack_configjson), [Task Schema](#advanced-reference-task-schema-plan-json), [Executor Selection](#advanced-reference-executor-selection), [Loop Strategy](#loop-strategy-loop_strategy), [Loop Modes](#advanced-reference-loop-modes).
 
 ### Analysis recap
 
@@ -190,6 +255,15 @@ Precedence rule:
 - If you pass an option explicitly on the CLI, that explicit option wins for that command.
 - If you do not pass an override on the CLI, global values from `llmstack_config.json` are used.
 
+You can also invoke `llmstack` directly as a Python module, which is equivalent to the wrappers above:
+
+```bash
+python -m llmstack --help
+python -m llmstack model preset balanced --restart
+```
+
+Important: use the project virtual environment interpreter when available (for example `env/bin/python3`) to avoid missing dependency errors from a global Python.
+
 ### 3) Stability levels at a glance
 
 Use one global knob (`backend_stability_profile`) unless you explicitly need per-backend differences.
@@ -217,61 +291,9 @@ python -m llmstack.cli model preset stable
 python -m llmstack.cli model preset safest --restart
 ```
 
+`--restart` applies the preset immediately only when it is safe to do so: if no active watchdog-owned loop is running, it restarts inference live; if a watchdog-owned loop is running, the live restart is intentionally skipped (with a warning) to avoid backend restart races and port rebind conflicts during active generation — restart the loop process itself to apply the new preset in that case.
+
 Full details: [Backend stability presets (all backends)](#backend-stability-presets-all-backends).
-
-### Runtime reliability notes (2026-07)
-
-The following behaviors are now documented and expected when operating long unattended runs.
-
-#### 1) Module entrypoint support
-
-You can now invoke `llmstack` directly as a Python module:
-
-```bash
-python -m llmstack --help
-python -m llmstack model preset balanced --restart
-```
-
-Important: use the project virtual environment interpreter when available (for example `env/bin/python3`) to avoid missing dependency errors from a global Python.
-
-#### 2) Safe preset application while a loop is running
-
-`llmstack model preset <preset> --restart` applies the preset immediately only when it is safe.
-
-- If no active watchdog-owned loop is running, it restarts inference live.
-- If a watchdog-owned loop is running, live restart is intentionally skipped and a warning is shown.
-
-This avoids backend restart races and port rebind conflicts during active generation. In this case, restart the loop process to apply the new preset safely.
-
-#### 3) Direct-mode degeneration guardrail
-
-Direct generation now includes a conservative anti-degeneration guard before file write.
-
-If extreme output corruption is detected, the write is skipped and the task is retried through normal verification feedback instead of committing unusable output.
-
-Current hardcoded thresholds (conservative):
-
-- Guardrail evaluates only for outputs >= 12000 chars
-- Repeated single-character run threshold: >= 512
-- Repeated long identifier threshold: >= 140 occurrences
-- Low-diversity check applies when extracted tokens >= 200
-- Low-diversity trigger: unique token ratio < 0.06
-
-These thresholds are intentionally strict to reduce false positives on valid large files.
-
-#### 4) Direct traffic now goes through Headroom
-
-Direct generation is now routed through the configured Headroom OpenAI-compatible endpoint instead of hitting the inference backend directly.
-
-- This makes direct-mode requests visible in `logs/headroom_traffic.jsonl` and in the dashboard request panels.
-- The actual URLs are derived from `llmstack_config.json` (`local_host`, `inference_port`, `headroom_port`) rather than hardcoded in the Python runtime.
-
-#### 5) Agent format fallback writes only the target file
-
-If an agent task uses `"on_format_error": "direct_context_fallback"`, Kowalski now regenerates only the task's declared `file`.
-
-- Context files are still read and injected as references.
-- Context files are no longer rewritten during fallback.
 
 ---
 
@@ -288,6 +310,8 @@ Claude Code  →  ccr (Claude Code Router)  →  Headroom proxy :headroom_port  
 | Claude Code Router (ccr) | — | Routes Claude Code requests to Headroom instead of Anthropic cloud |
 | Headroom proxy | `headroom_port` (default `8789`) | Proxy that compresses context in a code-aware manner before sending to the local inference backend |
 | Inference server (DFlash/MLX/TurboQuant) | `inference_port` (default `8787`) | OpenAI-compatible local inference endpoint selected from model registry |
+
+Kowalski's **direct-mode** executor (one-shot file generation, see [Executor Selection](#advanced-reference-executor-selection)) also goes through this same path rather than calling the inference backend directly: it is routed through the configured Headroom OpenAI-compatible endpoint, so direct-mode requests remain visible in `logs/headroom_traffic.jsonl` and in the dashboard request panels. All the URLs above are derived at runtime from `llmstack_config.json` (`local_host`, `inference_port`, `headroom_port`) rather than hardcoded.
 
 ---
 
@@ -536,7 +560,7 @@ Kowalski will:
 5. **Execute each task** in sequence:
    - Route to Claude Code (agent or direct, with `permission_mode` from config)
   - Auto-approve edits (and common filesystem operations) when `"permission_mode": "acceptEdits"`
-   - Apply 6-layer verification gates
+   - Apply the full verification pipeline (see [How Quality Gates Work](#how-quality-gates-work))
    - Commit verified changes to git
    - Resume or retry on failure
 6. Print final status
@@ -605,6 +629,378 @@ python3 -m llmstack.tools.plot_timings
 ```bash
 bash bin/update_stack.bash
 ```
+
+---
+
+## Benchmarks & Evals
+
+Once a project loop works the way you want, use these wrappers — `bin/launch_llmstack_evals.bash` and `bin/plot_llmstack_comparison.bash` — to run llmstack benchmark batches and comparison plots across models/backends, always through the project virtualenv. This section is the benchmarking counterpart to [How to Run](#how-to-run) above.
+
+### `bin/launch_llmstack_evals.bash`
+
+What it does:
+
+1. Validates that `env/` exists and uses `env/bin/python`.
+2. Activates the venv.
+3. Runs `local-coding-agent-evals/run_llmstack_eval_matrix.py`.
+4. Creates a timestamped output directory under `local-coding-agent-evals/results/` unless you override it.
+5. Passes any extra arguments through to the matrix runner.
+
+Default behavior:
+
+- Surface: `headroom`
+- Output dir: `local-coding-agent-evals/results/llmstack-matrix-<timestamp>`
+- Bench pack: speed-memory + hard-reasoning (agent pack optional)
+
+Usage examples:
+
+```bash
+# Default full matrix on headroom
+bash bin/launch_llmstack_evals.bash
+
+# Run only one model/backend pair
+bash bin/launch_llmstack_evals.bash \
+  --include-model dflash-qwen27b-dense \
+  --backend dflash
+
+# Inference surface + custom output dir + include agent pack
+bash bin/launch_llmstack_evals.bash \
+  --surface inference \
+  --output-dir local-coding-agent-evals/results/my-run \
+  --include-agent-pack
+```
+
+Wrapper options:
+
+- `--surface {headroom|inference}`
+- `--output-dir PATH`
+- `--include-agent-pack`
+- `-h, --help`
+
+Any other flags are forwarded to `run_llmstack_eval_matrix.py` (for example `--skip-speed`, `--skip-reasoning`, `--no-bypass-permissions`, `--include-model`, `--backend`).
+
+Agent problem pack across all backend/model combinations:
+
+- Yes, this is already supported by the same wrapper.
+- Use `--include-agent-pack` to enable it for each selected model key.
+- If you want to run only the agent problem pack (without speed/reasoning), combine it with `--skip-speed --skip-reasoning`.
+- A convenience alias wrapper is also available: `bin/launch_llmstack_agent_pack_matrix.bash`.
+
+Examples:
+
+```bash
+# Agent problem pack on all configured model/backend pairs
+bash bin/launch_llmstack_evals.bash \
+  --include-agent-pack
+
+# Agent problem pack only (skip other benchmark families)
+bash bin/launch_llmstack_evals.bash \
+  --include-agent-pack \
+  --skip-speed \
+  --skip-reasoning
+
+# Agent problem pack only for one backend subset
+bash bin/launch_llmstack_evals.bash \
+  --include-agent-pack \
+  --skip-speed \
+  --skip-reasoning \
+  --backend dflash
+
+# Same behavior via dedicated alias wrapper
+bash bin/launch_llmstack_agent_pack_matrix.bash
+
+# Alias wrapper with filters
+bash bin/launch_llmstack_agent_pack_matrix.bash \
+  --backend dflash \
+  --surface headroom
+```
+
+Where outputs go:
+
+- Matrix-level output root remains under `local-coding-agent-evals/results/...`.
+- Agent problem pack run artifacts are written by the headless runner under `local-coding-agent-evals/agent-problem-pack/runs/`.
+- Agent problem pack verification commands prefer `uv run pytest`; if `uv` is not available, they now fall back automatically to `python -m pytest`.
+
+### `bin/plot_llmstack_comparison.bash`
+
+What it does:
+
+1. Validates that `env/bin/python` exists.
+2. Activates the venv.
+3. Tries author-provided plotting scripts first (if present in known paths).
+4. Falls back to `local-coding-agent-evals/plot_llmstack_comparison.py` if none are found.
+5. Forwards all passed args to whichever plotting script is selected.
+6. Regenerates `AGENT_PROBLEM_PACK_RESULTS.md` via `llmstack/tools/agent_pack_report.py` after plotting finishes.
+
+Search order for author scripts:
+
+1. `local-coding-agent-evals/plot_comparison.py`
+2. `local-coding-agent-evals/scripts/plot_comparison.py`
+3. `local-coding-agent-evals/scripts/plot_results.py`
+4. `local-coding-agent-evals/speed-memory-benchmark/plot_results.py`
+5. `local-coding-agent-evals/hard-tool-reasoning-benchmark/plot_results.py`
+
+Usage examples:
+
+```bash
+# Generate comparison plot + markdown summary from latest results
+bash bin/plot_llmstack_comparison.bash
+
+# Explicit results root and output image
+bash bin/plot_llmstack_comparison.bash \
+  --results-root local-coding-agent-evals/results \
+  --output local-coding-agent-evals/results/llmstack_comparison.png \
+  --title "LLMStack Comparison"
+```
+
+Tip:
+
+- Typical flow is: run `launch_llmstack_evals.bash` first, then run `plot_llmstack_comparison.bash` on the generated results.
+- If you are reproducing the Agent Problem Pack workflow specifically, the most direct pair is:
+
+```bash
+bash bin/launch_llmstack_agent_pack_matrix.bash
+bash bin/plot_llmstack_comparison.bash
+```
+
+- The second command now regenerates both `local-coding-agent-evals/results/llmstack_comparison.{png,md}` and the repo-root `AGENT_PROBLEM_PACK_RESULTS.md` in one pass.
+
+---
+
+## Power Management & TCO Analysis
+
+Kowalski Loop includes a complete energy/total-cost-of-ownership (TCO) monitoring stack for local inference on Apple Silicon. This enables you to answer: **"Under what conditions is local inference actually cheaper than cloud APIs, and what are the hidden costs?"**
+
+### What it monitors
+
+| Feature | Description | Requires |
+|---------|-------------|-----------|
+| **Battery monitor** | Live battery %, plugged status, estimated remaining time | Laptop Mac only (hidden on desktops) |
+| **Power sampling** | GPU/CPU power draw (W), thermal state, fan RPM, SoC/CPU temperature, power unit auto-detection (mW/W) | `sudo powermetrics` (macOS) + `enable_power_sampling: true` |
+| **Energy per token** | kWh consumed per accepted output token | Power sampling enabled |
+| **Thermal throttling** | Detects when SoC throttles under sustained load | Power sampling enabled |
+| **TCO calculation** | Amortized hardware cost + energy vs. cloud API pricing | Hardware config in `llmstack_config.json` |
+
+### Configuration
+
+Add (or update) the `hardware` block in `llmstack_config.json`:
+
+```json
+{
+  "hardware": {
+    "model": "MacBook Pro 16-inch M3 Max",
+    "hw_model_id": "Mac14,5",
+    "ram_gb": 64,
+    "gpu_memory_gb": 128,
+    "purchase_price_usd": 3499,
+    "expected_life_years": 5,
+    "power_supply_w": 140,
+    "avg_grid_cost_kwh": 0.15,
+    "cooling": "passive"
+  },
+  "enable_power_sampling": false
+}
+```
+
+| Field | Purpose |
+|-------|---------|
+| `model` | Human-readable model name (e.g., "MacBook Pro 16-inch M3 Max") |
+| `hw_model_id` | Apple hardware ID from `sysctl -n hw.model` (e.g., "Mac14,5") — used to auto-detect laptop vs desktop |
+| `ram_gb` / `gpu_memory_gb` | Memory specs for capacity planning |
+| `purchase_price_usd` | Hardware purchase price for amortization calculation |
+| `expected_life_years` | Device lifespan for depreciation (default: 5) |
+| `power_supply_w` | PSU rating (for headroom calculations) |
+| `avg_grid_cost_kwh` | Your electricity rate in $/kWh (default: 0.15) |
+| `cooling` | "passive" or "active" — affects thermal modeling |
+
+Set `"enable_power_sampling": true` to collect measured power data during inference.
+
+### How power sampling works
+
+The power sampler (`llmstack/tools/power_sampler.py`) uses macOS `powermetrics`
+to measure:
+
+1. **GPU Power (W)** — GPU power draw during inference
+2. **CPU Power (W)** — CPU power draw during inference
+3. **System/Package/Combined Power (W)** — total system power (handles multiple
+   naming conventions across macOS versions)
+4. **Thermal State** — whether the SoC is throttling
+5. **Fan Speed (RPM)** — fan speed (where available)
+6. **SoC Temperature (°C)** — system-on-chip temperature
+7. **CPU Temperature (°C)** — CPU die temperature
+
+**Samplers:** Apple Silicon uses `cpu_power,gpu_power,thermal` (not `gpu,cpu_power`
+as on Intel Macs). The interval parameter `-i` is in **milliseconds**, not
+seconds — the default is 1000ms (1 sample per second).
+
+**Unit handling:** `powermetrics` on Apple Silicon reports values in **milliwatts**
+(e.g., `GPU Power: 197 mW`). The sampler parses both `mW` and `W` and normalizes
+all readings to watts internally.
+
+**Error handling:** All sampling failures are logged with diagnostic status
+(`ok` or `error`) and error messages in `power_metrics.csv`. Previously, errors
+were silently swallowed with `except: pass`, leaving power columns empty with no
+way to diagnose the problem.
+
+**sudo requirement:** The dashboard uses `sudo -n` (non-interactive) so the
+full-screen dashboard never hangs waiting for a hidden password prompt. You must
+pre-authorize `powermetrics` in the same terminal before launching the dashboard:
+
+```bash
+sudo -v
+./bin/launch_dashboard.bash
+```
+
+Or configure a restricted sudoers rule (recommended for production):
+
+```
+your_username ALL=(root) NOPASSWD: /usr/bin/powermetrics
+```
+
+On systems where `sudo` is unavailable or fails, the sampler gracefully degrades
+— power columns in the CSV will be empty with `status=error`, but token/timing
+data continues to be captured.
+
+### Verifying powermetrics works
+
+Before enabling power sampling, verify that `powermetrics` returns data on your
+Mac:
+
+```bash
+sudo /usr/bin/powermetrics \
+  --samplers cpu_power,gpu_power,thermal \
+  -i 1000 \
+  -n 1 |
+egrep 'CPU Power|GPU Power|Combined Power|Package Power|pressure level'
+```
+
+Expected output (values will vary):
+
+```
+GPU Power: 8.421 W
+CPU Power: 14.337 W
+Combined Power (CPU + GPU + ANE): 23.104 W
+```
+
+If you see `powermetrics: unrecognized sampler: gpu`, your macOS version does not
+support the `gpu` sampler — use `cpu_power,gpu_power,thermal` instead (Apple
+Silicon naming).
+
+### Dashboard power sampling (enabled via config)
+
+When `enable_power_sampling` is set to `true` in `llmstack_config.json`, the
+dashboard samples power metrics **continuously during each inference request**,
+not just after it completes. This allows accurate per-request energy attribution.
+
+**How it works:**
+1. Before each request, the dashboard calls `power_sampler.sample_powermetrics()`
+2. Samples are collected at 1-second intervals (configurable) during the request
+3. CPU and GPU power are averaged over the request duration
+4. Results are written to `logs/power_metrics.csv` with `status=ok` or
+   `status=error` plus diagnostic messages
+5. Power columns (`gpu_power_w`, `cpu_power_w`, `thermal_throttled`) are also
+   written to `logs/dflash_timings.csv` per request
+
+**Troubleshooting:** If power columns are empty, check the `error` column in
+`power_metrics.csv` for the root cause:
+
+```
+2026-07-19T17:02:31+00:00,,,,,,,,,error,"sudo: a password is required"
+```
+
+Common causes:
+- `sudo -v` was not run in the same terminal before launching the dashboard
+- `powermetrics` is not installed (non-macOS system)
+- macOS version does not support `gpu_power` sampler (use `cpu_power,thermal`
+  on older versions)
+
+### Quick power collection: `bin/collect_power.bash`
+
+For one-off TCO data collection without any system configuration, use the helper script:
+
+```bash
+# One-time sampling — asks for sudo password once, then closes automatically
+bin/collect_power.bash <mode> [duration_seconds]
+```
+
+**Modes:**
+
+| Command | What it measures | Duration | When to use |
+|---------|-----------------|----------|-------------|
+| `bin/collect_power.bash idle` | CPU only, system at rest | 30s (3 samples × 10s) | Baseline idle consumption |
+| `bin/collect_power.bash light` | GPU + CPU, single inference | 60s (12 samples × 5s) | Single prompt/response |
+| `bin/collect_power.bash sustained` | GPU + CPU, full agent loop | 300s (60 samples × 5s) | Kowalski running a plan |
+
+**Typical workflow for TCO data collection:**
+
+```bash
+# Step 1: Baseline idle (30s, one-time)
+bin/collect_power.bash idle
+# → logs/power_metrics.csv (idle baseline)
+
+# Step 2: In a second terminal, start inference
+bin/launch_kowalski.bash --plan piano.md
+
+# Step 3: In the first terminal, collect power during inference
+bin/collect_power.bash sustained
+# → logs/power_metrics.csv (appended, with GPU+CPU data)
+```
+
+**Output:** `logs/power_metrics.csv` with columns: `timestamp, mode, interval_s, samples, total_s, gpu_power_w, cpu_power_w, total_power_w, thermal_state, cpu_freq_mhz, gpu_freq_mhz` (and `status`, `error` columns when power sampling is enabled via config).
+
+**Key properties:**
+- ✅ **Stops automatically** after the configured number of samples — no need to kill it
+- ✅ **Asks for sudo once** — enter your password at start, then it runs unattended
+- ✅ **No visudo changes required** — works as-is, no system configuration needed
+- ✅ **Ctrl+C** to cancel before it starts
+
+### Dashboard battery panel
+
+On **laptop Macs**, the monitoring dashboard shows a green battery panel in the top row:
+
+```
+🔋 92% | Plugged: Yes | Est: Plugged
+```
+
+On **desktop Macs** (Mac Mini, Mac Studio), the panel is hidden entirely — no token waste, no confusing "N/A" output.
+
+### Output files
+
+| File | Description | Generated when |
+|------|-------------|-----------------|
+| `logs/dflash_timings.csv` | Per-request timing + power columns | Always (extended with 9 new columns) |
+| `logs/power_metrics.csv` | Time-series power samples with `status`/`error` columns | When `enable_power_sampling: true` |
+| `logs/session_summary.jsonl` | Aggregated session energy/cost/TCO | At end of each Kowalski run |
+
+Extended `dflash_timings.csv` columns: `gpu_power_w`, `cpu_power_w`, `thermal_throttled`, `wall_start_s`, `wall_end_s`, `session_id`, `accepted_tokens`. Power columns are populated when `enable_power_sampling: true` and `powermetrics` returns valid data.
+
+### TCO Formulas
+
+The system computes:
+
+- **Amortized monthly cost** = `purchase_price_usd / (expected_life_years × 12)`
+- **Hourly depreciation** = `purchase_price_usd / (expected_life_years × 365.25 × 24)`
+- **Break-even volume** = `amortized_monthly / (cloud_cost_per_m_tokens − local_energy_per_m_tokens)`
+- **Cloud equivalent** = current API pricing for the same token volume
+- **Savings** = `cloud_equivalent − (energy_cost + amortized_monthly)`
+
+### Generating TCO charts
+
+```bash
+cd ~/local-llm-workspace
+source env/bin/activate
+python3 -m llmstack.tools.plot_timings
+```
+
+This generates (in addition to existing charts):
+
+- `docs/img/energy_break_even.png` — cumulative energy + depreciation vs. cloud API cost, with break-even marker
+- `docs/img/energy_cost.png` — cumulative energy cost over session
+
+### Reference documents
+
+- [docs/power_monitor_plan.md](docs/power_monitor_plan.md) — full implementation plan and task list
+- [docs/power_monitor_tasklist.md](docs/power_monitor_tasklist.md) — phase-by-phase implementation checklist
 
 ---
 
@@ -844,7 +1240,8 @@ Complete reference of all available parameters:
   "watch_poll_seconds": 2,
   "watch_debounce_seconds": 0.5,
   "thinking_mode": "off",
-  "supervised_approval_mode": "console"
+  "supervised_approval_mode": "console",
+  "runlog_file": "logs/kowalski_runlog.jsonl"
 }
 ```
 
@@ -888,9 +1285,10 @@ CLI override precedence:
 
 | Parameter | Type | Default | Possible Values | Description |
 |---|---|---|---|---|
-| **`size_threshold_bytes`** | integer | `12000` | `1000` to `100000` | File size threshold (bytes) for executor selection. Files **larger** than this use the **agent** executor (multi-turn refinement). Files **smaller or equal** use **direct** executor (one-shot generation). Default `12000` ≈ 12KB. Lower = more direct mode; higher = more agent mode. |
+| **`size_threshold_bytes`** | integer | `12000` | `1000` to `100000` | File size threshold (bytes) for executor selection. **Only applies when `mode == "direct"`** (or no mode specified). Files **larger** than this use the **agent** executor (multi-turn refinement). Files **smaller or equal** use **direct** executor (one-shot generation). Default `12000` ≈ 12KB. Lower = more direct mode; higher = more agent mode. |
 | **`debug_log`** | string | `"./logs/kowalski_debug.log"` | Any file path, or `""` / `null` to disable | Path to the debug log. Records agentic input/output, direct generation rounds, and verification details. Set to empty string `""` or `null` to disable debug logging. Example: `"./logs/kowalski_debug.log"`, `"./logs/custom_debug.log"`, `""` |
 | **`debug_max_chars`** | integer | `0` | `0` to `1000000` | Maximum characters to include in each debug log entry. `0` = unlimited (log everything). Helps manage log size for large outputs. Example: `0` (unlimited), `10000` (10KB per entry), `50000` (50KB per entry) |
+| **`runlog_file`** | string | `"logs/kowalski_runlog.jsonl"` | Any file path (relative to `dev_root`, or absolute) | Where Kowalski appends one JSON line per completed/halted task (see [Loop Strategy](#loop-strategy-loop_strategy)). Written for every run, even without any `loop_strategy` configured. Failures to write are logged as a warning and never break the run. |
 
 ### Verification & Quality Gates
 
@@ -898,7 +1296,7 @@ CLI override precedence:
 |---|---|---|---|---|
 | **`require_change`** | boolean | `true` | `true` &#124; `false` | **Change gate**: Enabled (`true`) — task **must** modify its declared `file` or it fails (prevents no-ops). Disabled (`false`) — Kowalski skips this check and allows unchanged files. Recommended: `true` for safety. |
 | **`wiring_check`** | boolean | `true` | `true` &#124; `false` | **Wiring gate**: Enabled (`true`) — every `*.js` file must be referenced in `index.html`, and every referenced file must exist (catches orphan/unused JS). Disabled (`false`) — Kowalski skips wiring validation. Recommended: `true` for frontend projects, `false` for non-web. |
-| **`review_enabled`** | boolean | `false` | `true` &#124; `false` | **LLM review gate** (soft, optional): Enabled (`true`) — the weak model critiques the diff against the task spec. **Not blocking** (deterministic gates are the real protection); mostly informational. Disabled (`false`) — skips review. Recommended: `false` unless extra scrutiny needed. |
+| **`review_enabled`** | boolean | `false` | `true` &#124; `false` | **LLM review gate**: When enabled, a separate LLM call reads the generated file and judges correctness with a strict "default NO" system prompt. If the call fails/times out, the gate **passes by default** (transient LLM errors never break a run). Default `false` to avoid extra latency/cost. Recommended: `true` for high-stakes tasks. |
 
 ### Pluggable Gate Parameters
 
@@ -932,9 +1330,57 @@ Task-level override:
 - The chosen mode is visible in the agent debug log for each attempt.
 - The mode only affects agentic execution; direct-generation tasks keep their current behavior.
 
+### Loop Strategy (`loop_strategy`)
+
+`loop_strategy` is an optional block — set at the **plan level** (top-level `"loop_strategy"` key in `plan.json`) and/or **per task** (`task["loop_strategy"]`) — that layers extra behaviors on top of Kowalski's existing retry loop. Plans/tasks that omit it are completely unaffected: every hook below is a no-op, and Kowalski behaves exactly as it did before this feature existed (the only new side effect is one observability line appended to `logs/kowalski_runlog.jsonl` per task, see below).
+
+Task-level fields **shallow-merge over** plan-level defaults (per top-level key), so a task can override just one sub-block while inheriting the rest from the plan.
+
+| Field | Type | Default | Possible Values | Description |
+|---|---|---|---|---|
+| **`preset`** | string | — | `"simple_direct"` &#124; `"agent_run_until_done"` &#124; `"verified_maker_checker"` &#124; `"safe_repo_edit"` | Expands to a starter set of the fields below; explicit fields still override the preset. |
+| **`run_until_done`** | boolean | `true` | `true` &#124; `false` | `true` keeps the existing smart-retry loop (verification feedback re-injected on failure, up to `max_retries`). `false` makes the first failed attempt final — no further retries for that task. |
+| **`checker`** | object | — | `{"command": "..."}` | Independent maker/checker verification. After the executor reports `OK`, this shell command also has to succeed (exit `0`) or the outcome is downgraded to `VERIFY_FAILED` and retried with the checker's stdout/stderr fed back as feedback. Supports the same `{file}`/`{dev_root}` interpolation as `verification_plugins`. |
+| **`risk_policy`** | object | — | `{"denylist": [...], "max_changed_files": N}` | Safety guardrail. After an `OK` outcome, if any changed file matches a `denylist` glob (e.g. `.env`, `**/secrets/**`) or more than `max_changed_files` files changed, the change is rolled back and `Supervisor.run()` **halts entirely** for human review — it is not silently retried. |
+| **`budget`** | object | — | `{"max_attempts": N, "max_duration_seconds": N, "max_token_estimate": N}` | Stops retrying a task early (before spending another attempt) once any configured cap is hit. `max_token_estimate` uses a coarse character-count proxy, not a real tokenizer. |
+| **`context_policy`** | string | `"full"` | `"full"` &#124; `"changed_only"` | **Direct mode only** (agent-mode context comes from Claude's own tool calls, so this is a no-op there). `changed_only` trims a task's `context` list down to files that have already changed in git. |
+
+Presets and their tradeoffs:
+
+| Preset | What it sets | Tradeoff / when to use |
+|---|---|---|
+| `simple_direct` | nothing (fully inert) | Identical to not setting `loop_strategy` at all. |
+| `agent_run_until_done` | `run_until_done: true` | Formalizes today's default smart-retry behavior; use to be explicit in a plan. |
+| `verified_maker_checker` | `run_until_done: true`; still requires you to supply a concrete `checker.command` | Costs an extra command per attempt but catches plausible-but-wrong implementations that fool the implementer's own self-report. |
+| `safe_repo_edit` | `risk_policy` denylisting `.env`/secrets/auth/payments/billing/migrations/k8s-prod paths, `max_changed_files: 5` | Adds a hard stop before committing risky changes; use for tasks touching sensitive areas. |
+
+**Observability:** every task run — with or without `loop_strategy` — appends one JSON line to `logs/kowalski_runlog.jsonl` (path configurable via the top-level config key `runlog_file`) with `task_id`, `strategy` (a short description of what's active), `attempts`, `hard_fails`, `resumes`, `outcome`, `escalated`, `escalation_reason`, `duration_s`, and `token_estimate`. Writing the runlog can never fail the run — errors are caught and printed as a warning.
+
+Example:
+
+```json
+{
+  "loop_strategy": { "context_policy": "changed_only" },
+  "tasks": [
+    {
+      "id": "task_09",
+      "file": ".env.example",
+      "prompt": "Add the new REDIS_URL variable.",
+      "loop_strategy": { "preset": "safe_repo_edit" }
+    },
+    {
+      "id": "task_10",
+      "file": "billing.py",
+      "prompt": "Fix the tax calculation bug.",
+      "loop_strategy": { "checker": { "command": "pytest tests/test_billing.py -q" } }
+    }
+  ]
+}
+```
+
 ### Loop Mode Parameters
 
-These control **how** Kowalski selects and runs tasks. See [Loop Modes](#loop-modes) for a full walkthrough.
+These control **how** Kowalski selects and runs tasks. See [Loop Modes](#advanced-reference-loop-modes) for a full walkthrough.
 
 | Parameter | Type | Default | Possible Values | Description |
 |---|---|---|---|---|
@@ -964,9 +1410,27 @@ The `permission_mode` setting controls how Claude Code approves tool calls durin
 - **Interactive mode** (`bin/launch_ccr.bash`): Uses `acceptEdits` by default, configurable via `interactive_permission_mode`
 - **Kowalski mode** (`bin/launch_kowalski.bash`): Uses `permission_mode` from `llmstack_config.json` (default: `acceptEdits`)
 
-#### How Quality Gates Work
+### How Quality Gates Work
 
-Kowalski applies a **verification pipeline** to every completed task:
+Kowalski applies a **verification pipeline** to every completed task. At a glance, the core deterministic checks run in this order (pluggable, thinking-mode, and review gates are layered in around them — full numbered list below):
+
+```
+Task executed
+    ↓
+1. Shell verify        ← does `verify` command succeed?
+    ↓
+2. Feature markers     ← do all `expect` strings appear in file?
+    ↓
+3. Change gate         ← was `file` actually modified?
+    ↓
+4. Wiring check        ← any orphan/missing JS files?
+    ↓
+5. Smoke test          ← does `smoke` code pass?
+    ↓
+[✓ Pass → Commit] or [✗ Fail → Rollback & Retry]
+```
+
+Full pipeline, in order:
 
 1. **Shell verify** — Runs the task's `verify` command (e.g., `node --check`). Catches syntax errors.
 2. **Feature markers** — Checks that all strings in `expect` appear in the task's `file`. Ensures declared features are present.
@@ -977,7 +1441,7 @@ Kowalski applies a **verification pipeline** to every completed task:
 7. **Behavioral smoke** — Runs the task's `smoke` code (Node.js assertions). Catches runtime bugs.
 8. **Pluggable task plugins** (controlled by `verification_plugins`) — Runs extra shell-based checks filtered by task file / extension. Failing `fail` plugins feed stderr/stdout into smart retry.
 9. **Thinking mode** (controlled by `thinking_mode`) — Controls whether the agent runs with thinking disabled, adaptive, or fully on.
-10. **Optional LLM review** (controlled by `review_enabled`) — Optional diff critique (disabled by default).
+10. **Optional LLM review** (controlled by `review_enabled`) — When enabled, a separate LLM call reads the generated file and judges correctness with a strict "default NO" system prompt. If the call fails/times out, the gate **passes by default** (transient LLM errors never break a run). Default `false` to avoid extra latency/cost.
 11. **Plan-complete plugins** — After all tasks finish, Kowalski runs any `verification_plugins` with `"when": "plan_complete"` exactly once.
 
 If any gate fails, the task is rolled back and retried.
@@ -1070,7 +1534,7 @@ Each task in the plan file has this structure:
 | **`file`** | string | — | Primary output file for this task (relative path from `dev_root`). If omitted, Kowalski treats it as a setup/config task. | `"game.js"`, `"src/utils.ts"`, `"index.html"` |
 | **`mode`** | string | — | Execution mode. Default: `"agent"`. | `"agent"` = multi-turn refinement; `"direct"` = one-shot file generation |
 | **`context`** | array[string] | — | Read-only reference files passed to Claude Code. Use for existing code that the task depends on. Kowalski reads these files and passes them to the prompt. | `["index.html", "style.css", "utils.js"]` |
-| **`strategy`** | string | — | Hints Kowalski's executor selection logic. | `"edit"` → prefer **agent** (multi-turn edits); `"rewrite"` → prefer **direct** (one-shot generation) |
+| **`strategy`** | string | — | Hints Kowalski's executor selection logic. **Only applies when `mode == "direct"`** (or no mode specified). | `"edit"` → prefer **agent** (multi-turn edits); `"rewrite"` → prefer **direct** (one-shot generation) |
 | **`verify`** | string | — | Shell command to check syntax/correctness after execution. Must exit 0 on success. If it fails, the task is rolled back and retried. Kowalski runs this from `dev_root`. | `"node --check game.js"` |
 | **`expect`** | array[string] | — | Feature markers: strings that **must** appear in `file` after execution (case-insensitive). Useful for verifying functions, classes, or keywords were created. | `["function createBoard", "const BOARD_SIZE"]` |
 | **`require_change`** | boolean | — | Override global `require_change` config for this task. If `true`, the task **must** modify `file` or it fails (prevents no-ops). | `true` = fail if no change; `false` = allow no-op |
@@ -1083,6 +1547,7 @@ Each task in the plan file has this structure:
 | **`max_tokens`** | integer | — | Override default token limit (8192) for this task's responses. Use higher for large files, lower for quick tasks. | `4096`, `16384` |
 | **`tools`** | array[string] | — | Explicitly set tools available to Claude Code for this task. If omitted, uses config's `agent_tools`. | `["Read", "Edit", "Write"]` |
 | **`permission_mode`** | string | — | Override global `permission_mode` for this task. | `"default"`, `"acceptEdits"`, `"plan"`, `"auto"`, `"dontAsk"`, `"bypassPermissions"` |
+| **`loop_strategy`** | object | — | Optional per-task loop-strategy overrides (see [Loop Strategy](#loop-strategy-loop_strategy)). Shallow-merges over any plan-level `loop_strategy` default; omit entirely for today's default behavior. | `{"checker": {"command": "pytest -q"}}`, `{"preset": "safe_repo_edit"}` |
 
 ### How to Write a Plan Manually
 
@@ -1202,89 +1667,6 @@ Kowalski will:
 - Generate the complete `ai.js` file in one response
 - No multi-turn refinement (faster, but less iterative)
 
----
-
-## Advanced Reference: Executor Selection
-
-Kowalski chooses between **two executors** for each task:
-
-### **Agent Mode** (default)
-
-- Multi-turn conversation with Claude Code
-- Suitable for: complex logic, refactoring, multi-file coordination
-- Slower but iterative — Claude Code can ask for clarification, refine, and retry
-- Used when:
-  - `mode == "agent"` (explicit), or
-  - `strategy == "edit"`, or
-  - `file` is large (> `size_threshold_bytes`), or
-  - No `mode` specified (default)
-
-### **Direct Mode**
-
-- One-shot file generation
-- Suitable for: new files, templates, self-contained implementations
-- Faster but no multi-turn refinement
-- Used when:
-  - `mode == "direct"` (explicit), or
-  - `strategy == "rewrite"`, or
-  - `file` is small (< `size_threshold_bytes`)
-
-### Example Selection Logic
-
-```json
-{
-  "id": "task_A",
-  "file": "index.html",
-  "mode": "direct"
-  // → Uses DIRECT (explicit)
-}
-
-{
-  "id": "task_B",
-  "file": "game_logic.js",
-  "context": ["utils.js"],
-  "mode": "agent"
-  // → Uses AGENT (explicit)
-}
-
-{
-  "id": "task_C",
-  "file": "big_lib.ts",
-  "strategy": "rewrite"
-  // → Uses DIRECT (strategy hint + likely large file)
-}
-
-{
-  "id": "task_D",
-  "prompt": "Fix the collision detection..."
-  // → Uses AGENT (default; multi-turn refinement for complex logic)
-}
-```
-
----
-
-### Verification Gates Explained
-
-Kowalski applies **6 layers** to every task after execution:
-
-```
-Task executed
-    ↓
-1. Shell verify (syntax)  ← does `verify` command succeed?
-    ↓
-2. Feature markers       ← do all `expect` strings appear in file?
-    ↓
-3. Change gate          ← was `file` actually modified?
-    ↓
-4. Wiring check         ← any orphan/missing JS files?
-    ↓
-5. Smoke test           ← does `smoke` code pass?
-    ↓
-6. LLM review (optional) ← does weak model approve the diff?
-    ↓
-[✓ Pass → Commit] or [✗ Fail → Rollback & Retry]
-```
-
 ### Editing a Plan Mid-Run
 
 If a task fails and you want to **modify the plan** before resuming:
@@ -1315,12 +1697,83 @@ Example:
 
 ---
 
-## Loop Modes
+## Advanced Reference: Executor Selection
+
+Kowalski chooses between **two executors** for each task. The decision follows a strict precedence:
+
+1. **`mode` check** — if `mode` is anything other than `"direct"`, the executor is **always** `"agent"` (no further checks).
+2. **`strategy` / size checks** — these only apply when `mode == "direct"` (or when no `mode` is specified, which defaults to `"direct"`).
+
+### **Agent Mode** (default)
+
+- Multi-turn conversation with Claude Code
+- Suitable for: complex logic, refactoring, multi-file coordination
+- Slower but iterative — Claude Code can ask for clarification, refine, and retry
+- Used when:
+  - `mode == "agent"` (explicit), or
+  - `mode` is unset or any value other than `"direct"` (default), or
+  - `mode == "direct"` **and** `strategy == "edit"`, or
+  - `mode == "direct"` **and** the file is large (> `size_threshold_bytes`)
+
+### **Direct Mode**
+
+- One-shot file generation
+- Suitable for: new files, templates, self-contained implementations
+- Faster but no multi-turn refinement
+- Used when:
+  - `mode == "direct"` (explicit) **and** none of the following override conditions are met:
+    - `strategy == "edit"` (overrides to agent), or
+    - file is large (> `size_threshold_bytes`, overrides to agent)
+  - `mode == "direct"` **and** `strategy == "rewrite"` (explicit override)
+- Protected by a conservative anti-degeneration guardrail before file write: if extreme output corruption is detected, the write is skipped and the task is retried through normal verification feedback instead of committing unusable output. This only evaluates outputs ≥ 12000 chars, and triggers on a repeated single-character run ≥ 512, a repeated long identifier ≥ 140 occurrences, or a low-diversity unique-token-ratio < 0.06 once ≥ 200 tokens are extracted — thresholds intentionally strict to avoid false positives on valid large files.
+- Routed through the Headroom proxy rather than the inference backend directly (see [Architecture](#architecture)).
+
+### Example Selection Logic
+
+```json
+{
+  "id": "task_A",
+  "file": "index.html",
+  "mode": "direct"
+  // → Uses DIRECT (explicit mode, no overrides)
+}
+
+{
+  "id": "task_B",
+  "file": "game_logic.js",
+  "context": ["utils.js"],
+  "mode": "agent"
+  // → Uses AGENT (mode != "direct" → always agent, regardless of strategy/size)
+}
+
+{
+  "id": "task_C",
+  "file": "big_lib.ts",
+  "strategy": "rewrite"
+  // → Uses DIRECT (no mode specified → defaults to "direct"; strategy="rewrite" confirms direct)
+}
+
+{
+  "id": "task_D",
+  "prompt": "Fix the collision detection..."
+  // → Uses AGENT (no mode specified → defaults to "direct", but no strategy/size override → agent is the default fallback)
+}
+```
+
+**Key precedence rule:** `mode` is checked first. If `mode != "direct"`, the executor is unconditionally `"agent"`. The `strategy` and `size_threshold_bytes` checks only apply when `mode == "direct"` (or when no `mode` is specified, which defaults to `"direct"`).
+
+---
+
+Gate-by-gate behavior — what runs, in what order, and what happens on failure — is documented once, in full, under [How Quality Gates Work](#how-quality-gates-work). To edit a plan file while Kowalski is mid-run, see [Editing a Plan Mid-Run](#editing-a-plan-mid-run).
+
+---
+
+## Advanced Reference: Loop Modes
 
 By default Kowalski runs a fixed plan once, top to bottom (`plan` mode). The `loop_mode`
 config key lets you switch the **task-selection strategy** without changing anything
 else about verification, executors, or gates. All four modes share the same task
-schema, the same 6-layer verification pipeline, and the same git checkpointing.
+schema, the same [full verification pipeline](#how-quality-gates-work), and the same git checkpointing.
 
 | Mode | When to use | Task source | Stops when |
 |------|-------------|-------------|-----------|
@@ -1469,17 +1922,17 @@ Priority ordering still applies, so higher-priority tasks are presented first.
   - **Task loop**: For each pending task:
      - Choose executor (agent or direct)
      - Execute task (with retries/resumes)
-     - Apply 6-layer verification
+     - Apply full verification pipeline (see [How Quality Gates Work](#how-quality-gates-work))
      - Commit to git if verified
      - Mark complete or halt on failure
 
-3. **Verification Gates** (applied after task execution):
-   - **Layer 1**: Shell verify (syntax check)
-   - **Layer 2**: Feature markers (string presence)
-   - **Layer 3**: Change gate (file modification required?)
-   - **Layer 4**: Wiring check (orphan JS? missing refs?)
-   - **Layer 5**: Behavioral smoke (runtime assertions)
-   - **Layer 6**: LLM review (optional critique)
+3. **Verification Gates** (applied after task execution) — core checks shown here; the complete pipeline (including pluggable verification plugins, thinking-mode, and the optional review gate) is documented once under [How Quality Gates Work](#how-quality-gates-work):
+   - Shell verify (syntax check)
+   - Feature markers (string presence)
+   - Change gate (file modification required?)
+   - Wiring check (orphan JS? missing refs?)
+   - Behavioral smoke (runtime assertions)
+   - Optional LLM review (critique)
 
 4. **On Failure**:
   - **TIMEOUT** or **AGENT_ERROR** with valid progress → **resume** (up to `max_resumes`)
@@ -1540,138 +1993,3 @@ Priority ordering still applies, so higher-priority tasks are presented first.
 - [TurboQuant MLX full](https://github.com/matt-k-wong/turboquant-mlx-full)
 - [TurboQuant Plus](https://github.com/TheTom/turboquant_plus)
 - [Headroom Compression](https://github.com/headroomlabs-ai/headroom)
-
----
-
-## Evals wrappers (`bin/launch_llmstack_evals.bash` and `bin/plot_llmstack_comparison.bash`)
-
-These two wrappers standardize how you run llmstack benchmark batches and comparison plots from this repository root, always using the project virtualenv.
-
-### `bin/launch_llmstack_evals.bash`
-
-What it does:
-
-1. Validates that `env/` exists and uses `env/bin/python`.
-2. Activates the venv.
-3. Runs `local-coding-agent-evals/run_llmstack_eval_matrix.py`.
-4. Creates a timestamped output directory under `local-coding-agent-evals/results/` unless you override it.
-5. Passes any extra arguments through to the matrix runner.
-
-Default behavior:
-
-- Surface: `headroom`
-- Output dir: `local-coding-agent-evals/results/llmstack-matrix-<timestamp>`
-- Bench pack: speed-memory + hard-reasoning (agent pack optional)
-
-Usage examples:
-
-```bash
-# Default full matrix on headroom
-bash bin/launch_llmstack_evals.bash
-
-# Run only one model/backend pair
-bash bin/launch_llmstack_evals.bash \
-  --include-model dflash-qwen27b-dense \
-  --backend dflash
-
-# Inference surface + custom output dir + include agent pack
-bash bin/launch_llmstack_evals.bash \
-  --surface inference \
-  --output-dir local-coding-agent-evals/results/my-run \
-  --include-agent-pack
-```
-
-Wrapper options:
-
-- `--surface {headroom|inference}`
-- `--output-dir PATH`
-- `--include-agent-pack`
-- `-h, --help`
-
-Any other flags are forwarded to `run_llmstack_eval_matrix.py` (for example `--skip-speed`, `--skip-reasoning`, `--no-bypass-permissions`, `--include-model`, `--backend`).
-
-Agent problem pack across all backend/model combinations:
-
-- Yes, this is already supported by the same wrapper.
-- Use `--include-agent-pack` to enable it for each selected model key.
-- If you want to run only the agent problem pack (without speed/reasoning), combine it with `--skip-speed --skip-reasoning`.
-- A convenience alias wrapper is also available: `bin/launch_llmstack_agent_pack_matrix.bash`.
-
-Examples:
-
-```bash
-# Agent problem pack on all configured model/backend pairs
-bash bin/launch_llmstack_evals.bash \
-  --include-agent-pack
-
-# Agent problem pack only (skip other benchmark families)
-bash bin/launch_llmstack_evals.bash \
-  --include-agent-pack \
-  --skip-speed \
-  --skip-reasoning
-
-# Agent problem pack only for one backend subset
-bash bin/launch_llmstack_evals.bash \
-  --include-agent-pack \
-  --skip-speed \
-  --skip-reasoning \
-  --backend dflash
-
-# Same behavior via dedicated alias wrapper
-bash bin/launch_llmstack_agent_pack_matrix.bash
-
-# Alias wrapper with filters
-bash bin/launch_llmstack_agent_pack_matrix.bash \
-  --backend dflash \
-  --surface headroom
-```
-
-Where outputs go:
-
-- Matrix-level output root remains under `local-coding-agent-evals/results/...`.
-- Agent problem pack run artifacts are written by the headless runner under `local-coding-agent-evals/agent-problem-pack/runs/`.
-- Agent problem pack verification commands prefer `uv run pytest`; if `uv` is not available, they now fall back automatically to `python -m pytest`.
-
-### `bin/plot_llmstack_comparison.bash`
-
-What it does:
-
-1. Validates that `env/bin/python` exists.
-2. Activates the venv.
-3. Tries author-provided plotting scripts first (if present in known paths).
-4. Falls back to `local-coding-agent-evals/plot_llmstack_comparison.py` if none are found.
-5. Forwards all passed args to whichever plotting script is selected.
-6. Regenerates `AGENT_PROBLEM_PACK_RESULTS.md` via `llmstack/tools/agent_pack_report.py` after plotting finishes.
-
-Search order for author scripts:
-
-1. `local-coding-agent-evals/plot_comparison.py`
-2. `local-coding-agent-evals/scripts/plot_comparison.py`
-3. `local-coding-agent-evals/scripts/plot_results.py`
-4. `local-coding-agent-evals/speed-memory-benchmark/plot_results.py`
-5. `local-coding-agent-evals/hard-tool-reasoning-benchmark/plot_results.py`
-
-Usage examples:
-
-```bash
-# Generate comparison plot + markdown summary from latest results
-bash bin/plot_llmstack_comparison.bash
-
-# Explicit results root and output image
-bash bin/plot_llmstack_comparison.bash \
-  --results-root local-coding-agent-evals/results \
-  --output local-coding-agent-evals/results/llmstack_comparison.png \
-  --title "LLMStack Comparison"
-```
-
-Tip:
-
-- Typical flow is: run `launch_llmstack_evals.bash` first, then run `plot_llmstack_comparison.bash` on the generated results.
-- If you are reproducing the Agent Problem Pack workflow specifically, the most direct pair is:
-
-```bash
-bash bin/launch_llmstack_agent_pack_matrix.bash
-bash bin/plot_llmstack_comparison.bash
-```
-
-- The second command now regenerates both `local-coding-agent-evals/results/llmstack_comparison.{png,md}` and the repo-root `AGENT_PROBLEM_PACK_RESULTS.md` in one pass.

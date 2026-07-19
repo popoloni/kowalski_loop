@@ -191,6 +191,47 @@ def _abs_path(base_dir, value):
     return value if os.path.isabs(value) else os.path.normpath(os.path.join(base_dir, value))
 
 
+
+def _require_int(cfg, key, minimum=None, maximum=None):
+    value = cfg.get(key)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{key} must be an integer")
+    if minimum is not None and value < minimum:
+        raise ValueError(f"{key} must be >= {minimum}")
+    if maximum is not None and value > maximum:
+        raise ValueError(f"{key} must be <= {maximum}")
+
+
+def validate_config(cfg):
+    for key in ("inference_port", "headroom_port"):
+        _require_int(cfg, key, 1, 65535)
+    for key in ("timeout_seconds", "warmup_timeout_seconds", "max_turns"):
+        _require_int(cfg, key, 1)
+    for key in ("max_retries", "max_resumes", "agent_format_retries"):
+        _require_int(cfg, key, 0)
+    for key in ("enable_power_sampling", "require_change", "wiring_check", "review_enabled"):
+        if key in cfg and not isinstance(cfg[key], bool):
+            raise ValueError(f"{key} must be a JSON boolean")
+    mode = str(cfg.get("loop_mode", "plan")).strip().lower()
+    if mode not in {"plan", "continuous", "watch", "supervised"}:
+        raise ValueError("loop_mode must be plan, continuous, watch, or supervised")
+    models = cfg.get("models")
+    if models is not None:
+        if not isinstance(models, dict) or not models:
+            raise ValueError("models must be a non-empty object")
+        for name, model in models.items():
+            if not isinstance(model, dict):
+                raise ValueError(f"models[{name!r}] must be an object")
+            if model.get("type") not in {"dflash", "mlx", "turboquant"}:
+                raise ValueError(f"models[{name!r}].type is invalid")
+            if not isinstance(model.get("target"), str) or not model["target"].strip():
+                raise ValueError(f"models[{name!r}].target is required")
+    active = cfg.get("active_model")
+    if active and isinstance(models, dict) and active not in models:
+        raise ValueError(f"active_model {active!r} is not present in models")
+    return cfg
+
+
 def load_config(config_path="llmstack_config.json"):
     cfg = dict(DEFAULT_CONFIG)
     base_dir = os.path.dirname(os.path.abspath(config_path))
@@ -201,8 +242,15 @@ def load_config(config_path="llmstack_config.json"):
     else:
         print("⚠️ [Kowalski] No llmstack_config.json found, using defaults.")
 
+    validate_config(cfg)
     apply_runtime_network_defaults(cfg)
 
+    cfg["dev_root"] = _abs_path(base_dir, cfg.get("dev_root", "."))
+    cfg["plan_file"] = _abs_path(base_dir, cfg.get("plan_file", "plan.json"))
+    cfg["continuous_queue_file"] = _abs_path(base_dir, cfg.get("continuous_queue_file", "task_queue.json"))
+    cfg["watch_queue_file"] = _abs_path(base_dir, cfg.get("watch_queue_file", "task_queue.json"))
+    cfg["watch_root"] = _abs_path(base_dir, cfg.get("watch_root", cfg["dev_root"]))
+    cfg["config_path"] = os.path.abspath(config_path)
     cfg["log_dir"] = _abs_path(base_dir, cfg.get("log_dir", "logs"))
     os.makedirs(cfg["log_dir"], exist_ok=True)
 
@@ -221,6 +269,15 @@ def load_config(config_path="llmstack_config.json"):
         cfg["interactive_permission_mode"] = normalize_permission_mode(cfg.get("interactive_permission_mode"))
     cfg["verification_plugins"] = normalize_verification_plugins(cfg.get("verification_plugins"))
     cfg["thinking_mode"] = normalize_thinking_mode(cfg.get("thinking_mode"))
+
+    # Load hardware block for TCO analysis (optional, defaults to empty dict)
+    hw = cfg.get("hardware")
+    if isinstance(hw, dict):
+        cfg["hardware"] = hw
+    else:
+        cfg["hardware"] = {}
+
+    cfg["enable_power_sampling"] = cfg.get("enable_power_sampling", False)
 
     timeout_s = int(cfg.get("timeout_seconds", cfg["timeout_seconds"]))
     cfg["task_timeout"] = timeout_s

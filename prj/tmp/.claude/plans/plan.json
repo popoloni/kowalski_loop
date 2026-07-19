@@ -1,0 +1,73 @@
+{
+  "project": "build a complete clone of Space Invaders arcade, playable on",
+  "tasks": [
+    {
+      "id": "1",
+      "status": "pending",
+      "mode": "direct",
+      "prompt": "Create the HTML file with a canvas element and basic CSS to center the game on the screen.",
+      "file": "index.html",
+      "context": [],
+      "verify": "test -s \"index.html\""
+    },
+    {
+      "id": "2",
+      "status": "pending",
+      "mode": "direct",
+      "prompt": "Create the main JavaScript file to handle the game loop, canvas context, and keyboard input for movement.",
+      "file": "game.js",
+      "context": [
+        "index.html"
+      ],
+      "verify": "test -f \"game.js\" && node --check \"game.js\""
+    },
+    {
+      "id": "3",
+      "status": "pending",
+      "mode": "direct",
+      "prompt": "Create a Player class that renders a simple rectangle or sprite and handles left/right movement within canvas bounds.",
+      "file": "game.js",
+      "context": [
+        "game.js",
+        "index.html"
+      ],
+      "verify": "test -f \"game.js\" && node --check \"game.js\""
+    },
+    {
+      "id": "4",
+      "status": "pending",
+      "mode": "direct",
+      "prompt": "Create an Alien class and a Grid manager to render rows of aliens and handle their collective horizontal movement and drop-down behavior.",
+      "file": "game.js",
+      "context": [
+        "game.js",
+        "index.html"
+      ],
+      "verify": "test -f \"game.js\" && node --check \"game.js\""
+    },
+    {
+      "id": "5",
+      "status": "pending",
+      "mode": "direct",
+      "prompt": "Create a Projectile class to handle player bullets moving upwards and enemy bullets moving downwards, including collision detection with aliens and the player.",
+      "file": "game.js",
+      "context": [
+        "game.js",
+        "index.html"
+      ],
+      "verify": "test -f \"game.js\" && node --check \"game.js\""
+    },
+    {
+      "id": "6",
+      "status": "pending",
+      "mode": "direct",
+      "prompt": "Implement game over, win conditions, score tracking, and a restart mechanism to complete the gameplay loop.",
+      "file": "game.js",
+      "context": [
+        "game.js",
+        "index.html"
+      ],
+      "verify": "test -f \"game.js\" && node --check \"game.js\""
+    }
+  ]
+}

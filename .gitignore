@@ -1,8 +1,8 @@
 # Virtual environment
 env/
 
-# projects (have their own git repo)
-prj/
+# Pacman clone (has its own git repo)
+pacman_clone/
 
 # Backup
 bck/
@@ -15,26 +15,12 @@ logs/
 
 # Python cache
 __pycache__/
-.pytest_cache/
 *.py[cod]
 *$py.class
 *.pyc
-*.pyo
-*.pyd
-.mypy_cache/
-.ruff_cache/
-.coverage
-.coverage.*
-*.egg-info/
 
 # macOS
 .DS_Store
 
 # VSCode
 .vscode/
-
-# Local automation scripts (not versioned)
-.local/
-
-# Local exported article PDF
-docs/Editing The Kowalski Loop: Turning a Local Model into a Verified Coding System – Medium.pdf

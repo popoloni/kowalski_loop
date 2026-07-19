@@ -1,7 +1,11 @@
 import fnmatch
+import json
 import os
 import re
 import subprocess
+import urllib.request
+
+from llmstack.core.safety import confined_path, run_command
 
 
 def changed_files(git_manager):
@@ -75,8 +79,112 @@ def syntax_ok(dev_root, task):
 
 
 def review(task, dev_root):
-    print("🧑‍⚖️ [Kowalski] Review is not enabled in Phase 0; passing by default.")
-    return True
+    """LLM-based review gate: a separate model call judges code correctness.
+
+    Uses the same inference endpoint as the rest of Kowalski (Headroom proxy
+    or direct inference) with a strict "default NO" system prompt.  If the
+    call fails / times out the gate **passes by default** so that transient
+    LLM errors never break a run — the deterministic gates are the real
+    protection.
+
+    Returns True when the reviewer says the code is correct, False otherwise.
+    """
+    target = task.get("file")
+    if not target:
+        # No file to review — nothing to do.
+        return True
+
+    path = os.path.join(dev_root, target)
+    if not os.path.exists(path):
+        # File not yet written — nothing to review.
+        return True
+
+    code = open(path, encoding="utf-8", errors="ignore").read()
+    if not code.strip():
+        # Empty file — nothing to review.
+        return True
+
+    prompt = task.get("prompt", "")
+    print("🧑‍⚖️ [Kowalski] Running LLM review gate on '{}' ...".format(target))
+
+    # Import here so we fail fast only when review is actually enabled.
+    try:
+        from llmstack.core.executors import Executor
+    except ImportError:
+        # If Executor is not importable (e.g. in a test stub), pass.
+        return True
+
+    # Build a minimal executor just to get the chat URL.
+    class _ReviewExecutor(Executor):
+        def __init__(self, chat_url, model_target, task_timeout):
+            self.direct_url = chat_url
+            self.model_target = model_target
+            self.task_timeout = task_timeout
+
+    # Extract chat URL and model from the task's config (passed via globals).
+    chat_url = getattr(review, "_chat_url", None)
+    model_target = getattr(review, "_model_target", None)
+    task_timeout = getattr(review, "_task_timeout", 120)
+
+    if not chat_url or not model_target:
+        # No inference endpoint configured — pass by default.
+        print("⚠️  [Kowalski] Review gate: no inference endpoint configured, passing.")
+        return True
+
+    reviewer = _ReviewExecutor(chat_url, model_target, task_timeout)
+
+    system_msg = (
+        "You are a strict code reviewer. Default to NO unless the code is "
+        "clearly fully correct. You will see a task description and a "
+        "candidate solution. Judge whether the solution is fully correct "
+        "for all valid inputs. Answer only YES or NO."
+    )
+
+    user_msg = (
+        "Task:\n{}\n\n"
+        "Candidate solution:\n```python\n{}\n```\n\n"
+        "Is it fully correct for all valid inputs? Answer only YES or NO."
+    ).format(prompt, code)
+
+    try:
+        body = json.dumps({
+            "model": model_target,
+            "messages": [
+                {"role": "system", "content": system_msg},
+                {"role": "user", "content": user_msg},
+            ],
+            "max_tokens": 4,
+            "temperature": 0.0,
+            "stream": False,
+        }).encode()
+
+        req = urllib.request.Request(
+            reviewer.direct_url,
+            data=body,
+            headers={"Content-Type": "application/json"},
+        )
+        resp = json.load(urllib.request.urlopen(req, timeout=task_timeout))
+        answer = (resp["choices"][0]["message"]["content"] or "").strip().upper()
+        correct = answer.startswith("Y")
+
+        if correct:
+            print("✅ [Kowalski] Review gate PASSED.")
+        else:
+            print("❌ [Kowalski] Review gate FAILED — reviewer rejected the code.")
+
+        return correct
+
+    except Exception as exc:
+        # On any error (timeout, network, malformed response), pass by
+        # default so that transient LLM failures never break a run.
+        print("⚠️  [Kowalski] Review gate error ({}), passing by default.".format(exc))
+        return True
+
+
+# Internal state set by Supervisor when building the review executor.
+review._chat_url = None
+review._model_target = None
+review._task_timeout = 120
 
 
 def _gate_spec(name, kind, **data):

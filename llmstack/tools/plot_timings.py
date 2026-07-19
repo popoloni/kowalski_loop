@@ -5,7 +5,9 @@ Outputs (into docs/img/):
   1. prefill_cliff.png   — prefill time vs prompt size, cache HIT vs MISS
   2. context_memory.png  — prompt-token + peak-memory growth over the longest run
   3. cachehit_hist.png   — distribution of per-call total time, hit vs miss
-  4. sessions/session_*.png — one composite chart per work session
+  4. energy_break_even.png  — cumulative energy cost vs. cloud API cost, break-even marker
+  5. energy_cost.png      — cumulative energy cost over session
+  6. sessions/session_*.png — one composite chart per work session
 """
 import json
 from pathlib import Path
@@ -163,6 +165,156 @@ def _plot_total_hist(ax, subset: pd.DataFrame, title: str) -> bool:
         return True
 
 
+def _render_sessions(df: pd.DataFrame) -> None:
+        SESSION_IMG.mkdir(parents=True, exist_ok=True)
+        created = 0
+        for session_id, session in df.groupby("session_id", sort=True):
+                session = session.reset_index(drop=True)
+                if len(session) < SESSION_MIN_CALLS:
+                        continue
+                label = session["session_label"].iat[0]
+                backend = ", ".join(sorted({str(v) for v in session["backend"].dropna() if str(v).strip()})) or "unknown"
+                fig, axes = plt.subplots(1, 3, figsize=(16.5, 4.8))
+                fig.suptitle(
+                        f"Work session {label}  |  backend={backend}  |  calls={len(session)}  |  "
+                        f"{session['timestamp'].min():%Y-%m-%d %H:%M} → {session['timestamp'].max():%H:%M}",
+                        fontsize=12,
+                )
+                _plot_prefill(axes[0], session, "Prefill cliff in this session")
+                _plot_context_memory(axes[1], session, "Context and memory during this session")
+                _plot_total_hist(axes[2], session, "Total turn-time distribution")
+                fig.tight_layout(rect=(0, 0, 1, 0.94))
+                fig.savefig(SESSION_IMG / f"session_{label}.png", dpi=130)
+                plt.close(fig)
+                created += 1
+                print(
+                        "  session",
+                        session_id,
+                        label,
+                        f"calls={len(session)}",
+                        f"big_calls={(session['prompt_tokens'] >= BIG_PROMPT_TOKENS).sum()}",
+                        f"backend={backend}",
+                )
+        print("Per-session charts written to", str(SESSION_IMG), f"({created} sessions)")
+
+
+def _load_hardware() -> dict:
+        """Return hardware dict from config, or sensible defaults."""
+        if not CONFIG_PATH.exists():
+                return {}
+        try:
+                cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+                return {}
+        hw = cfg.get("hardware", {})
+        if not hw:
+                hw = {
+                        "purchase_price_usd": 3000,
+                        "expected_life_years": 5,
+                        "power_supply_w": 140,
+                        "avg_grid_cost_kwh": 0.15,
+                }
+        return hw
+
+
+def _compute_cloud_cost(row: pd.Series) -> float:
+        """Rough cloud API cost estimate per call (USD)."""
+        pt = row.get("prompt_tokens", 0) or 0
+        dt = row.get("decode_tokens", 0) or 0
+        # Qwen3-27B-like pricing: $0.27/M input, $1.10/M output
+        return (pt * 0.27 + dt * 1.10) / 1_000_000
+
+
+def _compute_local_energy_cost(row: pd.Series, hw: dict) -> float:
+        """Estimate local energy cost per call (USD)."""
+        total_s = row.get("total_time_s", 0) or 0
+        grid_cost_kwh = hw.get("avg_grid_cost_kwh", 0.15)
+        # Assume ~80W average draw during inference (idle + active mix)
+        power_w = 80.0
+        kwh = (power_w * total_s) / 3600.0
+        return kwh * grid_cost_kwh
+
+
+def _compute_hourly_depreciation(hw: dict) -> float:
+        """Hourly cost of hardware ownership (USD/hr)."""
+        price = hw.get("purchase_price_usd", 3000)
+        years = hw.get("expected_life_years", 5)
+        return price / (years * 365.25 * 24)
+
+
+def _plot_energy_break_even(df: pd.DataFrame, hw: dict) -> None:
+        """Cumulative energy + depreciation cost vs cloud API cost, break-even marker."""
+        fig, ax = plt.subplots(figsize=(9, 5.5))
+
+        cloud_costs = df.apply(_compute_cloud_cost, axis=1).cumsum()
+        energy_costs = df.apply(lambda r: _compute_local_energy_cost(r, hw), axis=1).cumsum()
+        hourly_dep = _compute_hourly_depreciation(hw)
+        # Convert timestamps to hours from start for depreciation
+        t0 = df["timestamp"].iat[0]
+        hours = df["timestamp"].apply(lambda ts: (ts - t0).total_seconds() / 3600).cumsum()
+        dep_costs = hours * hourly_dep
+
+        total_local = energy_costs + dep_costs
+
+        ax.plot(cloud_costs, color="#c1121f", lw=1.8, label="Cloud API cumulative cost")
+        ax.plot(total_local, color="#1a8b57", lw=1.8, label="Local cumulative cost (energy + depreciation)")
+
+        # Find break-even point
+        diff = cloud_costs - total_local
+        crossing = diff[diff <= 0]
+        if not crossing.empty:
+                idx = crossing.index[0]
+                val = total_local.iloc[idx]
+                ax.axvline(x=idx, color="#d4a017", ls="--", lw=1.2, alpha=0.8)
+                ax.text(
+                        idx, val, f" Break-even\n~${val:.2f}",
+                        va="bottom", ha="left", color="#d4a017", fontsize=10,
+                        bbox=dict(boxstyle="round,pad=0.3", fc="none", ec="#d4a017", alpha=0.7),
+                )
+        else:
+                ax.text(
+                        0.5, 0.5, "No break-even reached yet",
+                        ha="center", va="center", transform=ax.transAxes,
+                        color="#d4a017", fontsize=11,
+                )
+
+        ax.set_xlabel("Model calls (cumulative)")
+        ax.set_ylabel("Cumulative cost (USD)")
+        ax.set_title("Local vs Cloud: when does local pay for itself?")
+        ax.grid(True, ls="--", alpha=0.25)
+        ax.legend(loc="upper left", framealpha=0.9)
+        fig.tight_layout()
+        fig.savefig(IMG / "energy_break_even.png", dpi=130)
+        plt.close(fig)
+
+        # Print summary
+        print(f"  Cloud total  : ${cloud_costs.iloc[-1]:.2f} ({len(df)} calls)")
+        print(f"  Local total  : ${total_local.iloc[-1]:.2f} (energy + depreciation)")
+        if not crossing.empty:
+                print(f"  Break-even   : call #{crossing.index[0]} (~${total_local.iloc[crossing.index[0]]:.2f})")
+        else:
+                print(f"  Break-even   : not yet reached (local still cheaper)")
+
+
+def _plot_energy_cost(df: pd.DataFrame, hw: dict) -> None:
+        """Cumulative energy cost over session (excl. depreciation)."""
+        fig, ax = plt.subplots(figsize=(9, 5.5))
+
+        energy_costs = df.apply(lambda r: _compute_local_energy_cost(r, hw), axis=1).cumsum()
+        hours = df["timestamp"].apply(lambda ts: (ts - df["timestamp"].iat[0]).total_seconds() / 3600).cumsum()
+
+        ax.plot(hours, energy_costs, color="#1a8b57", lw=1.8)
+        ax.set_xlabel("Elapsed time (hours)")
+        ax.set_ylabel("Cumulative energy cost (USD)")
+        ax.set_title(f"Local energy cost over {len(df)} calls")
+        ax.grid(True, ls="--", alpha=0.25)
+        fig.tight_layout()
+        fig.savefig(IMG / "energy_cost.png", dpi=130)
+        plt.close(fig)
+
+        print(f"  Total energy cost: ${energy_costs.iloc[-1]:.2f}")
+
+
 def _render_aggregate(df: pd.DataFrame) -> None:
         big = df[df["prompt_tokens"] >= BIG_PROMPT_TOKENS].copy()
         hit = big[~big["miss"]]
@@ -187,6 +339,10 @@ def _render_aggregate(df: pd.DataFrame) -> None:
         fig.tight_layout()
         fig.savefig(IMG / "cachehit_hist.png", dpi=130)
         plt.close(fig)
+
+        hw = _load_hardware()
+        _plot_energy_break_even(df, hw)
+        _plot_energy_cost(df, hw)
 
         print("Charts written to", str(IMG))
         print("  big calls (>=5k tok):", len(big))

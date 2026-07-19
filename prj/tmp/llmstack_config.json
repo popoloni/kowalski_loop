@@ -1,0 +1,21 @@
+{
+  "dev_root": ".",
+  "project_type": "generic",
+  "project_template": {
+    "name": "generic",
+    "language": "generic",
+    "description": "Language-agnostic project template for any codebase",
+    "starter_layout": [
+      "README.md",
+      "tasks.md"
+    ],
+    "plan_name": "plan.json"
+  },
+  "project_goal": "build a complete clone of Space Invaders arcade, playable on a browser",
+  "plan_file": "./.claude/plans/plan.json",
+  "active_model": "dflash-qwen27b",
+  "loop_mode": "plan",
+  "permission_mode": "acceptEdits",
+  "thinking_mode": "off",
+  "verification_plugins": {}
+}

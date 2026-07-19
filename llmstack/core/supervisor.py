@@ -3,8 +3,10 @@ import os
 import time
 
 from llmstack.core.executors import Executor
-from llmstack.core.gates import run_plan_complete_plugins
+from llmstack.core.gates import run_plan_complete_plugins, review
 from llmstack.core.git_ckpt import GitManager
+from llmstack.core.runlog import estimate_tokens, log_run
+from llmstack.core.strategy import LoopStrategy, resolve_loop_strategy
 from llmstack.modes.continuous_mode import ContinuousMode
 from llmstack.modes.plan_mode import PlanMode
 from llmstack.modes.supervised_mode import SupervisedMode
@@ -25,6 +27,10 @@ class Supervisor:
                                  model_name=self.services.active_model_name,
                                  model_target=self.services.backend.model_target(),
                                  direct_url=self.config.get("headroom_chat_url"))
+        # Wire the review gate with the same inference endpoint the executor uses.
+        review._chat_url = self.executor.direct_url
+        review._model_target = self.executor.model_target
+        review._task_timeout = int(config.get("task_timeout", 120))
 
     def ensure_git(self):
         self.git.ensure_git()
@@ -90,8 +96,15 @@ class Supervisor:
                 print("🧹 [Kowalski] Corrupt leftover detected — restoring to last checkpoint.")
                 self.git.restore_to_checkpoint(task)
 
+            strategy = LoopStrategy(resolve_loop_strategy(task, plan))
+            task_started_at = time.time()
+            cumulative_tokens = 0
+            escalated = False
+            escalation_reason = ""
+
             hard_fails = resumes = 0
             done = False
+            n = 0
             while (not done and hard_fails < self.config["max_retries"] and not self.services.should_stop()):
                 if not self.services.is_healthy():
                     self.services.restart()
@@ -100,13 +113,54 @@ class Supervisor:
                     self.git.restore_to_checkpoint(task)
 
                 n = hard_fails + resumes + 1
+
+                budget_hit, budget_reason = strategy.budget_exceeded(
+                    attempts_used=n - 1,
+                    elapsed_seconds=time.time() - task_started_at,
+                    token_estimate=cumulative_tokens,
+                )
+                if budget_hit:
+                    print(f"🛑 [Kowalski] {budget_reason}")
+                    escalated = True
+                    escalation_reason = budget_reason
+                    hard_fails = self.config["max_retries"]
+                    break
+
                 tag = executor_type + (", resume" if resumes else "")
                 print(f"▶️  [Kowalski] Task {task.get('id')} — attempt {n} ({tag})")
 
                 if executor_type == "direct":
-                    outcome = self.executor.run_direct_task(task, attempt=n)
+                    original_context = task.get("context")
+                    if strategy.spec.get("context_policy") == "changed_only":
+                        task["context"] = strategy.effective_context(task, self.git)
+                    try:
+                        outcome = self.executor.run_direct_task(task, attempt=n)
+                    finally:
+                        if original_context is None:
+                            task.pop("context", None)
+                        else:
+                            task["context"] = original_context
                 else:
                     outcome = self.executor.execute_task(task, attempt=n, resuming=(resumes > 0))
+
+                cumulative_tokens += estimate_tokens(task.get("prompt", ""))
+
+                escalated_this_attempt = False
+                if outcome == "OK":
+                    safety_ok, safety_reason = strategy.check_safety(self.dev_root, self.git)
+                    if not safety_ok:
+                        print(f"🛑 [Kowalski] {safety_reason}")
+                        outcome = "VERIFY_FAILED"
+                        task["_verify_feedback"] = safety_reason
+                        escalated = True
+                        escalated_this_attempt = True
+                        escalation_reason = safety_reason
+                    else:
+                        checker_ok, checker_reason = strategy.run_checker(task, self.dev_root)
+                        if not checker_ok:
+                            print(f"🧑‍⚖️ [Kowalski] {checker_reason}")
+                            outcome = "VERIFY_FAILED"
+                            task["_verify_feedback"] = checker_reason
 
                 result = mode.on_result(
                     task,
@@ -123,6 +177,15 @@ class Supervisor:
                 resumes = result["resumes"]
                 done = result["done"]
 
+                if escalated_this_attempt:
+                    # Safety violations are blocked, not retried — no auto-act.
+                    hard_fails = self.config["max_retries"]
+                    done = False
+                elif not strategy.spec.get("run_until_done", True) and not done:
+                    # run_until_done=False opts out of the smart-retry loop:
+                    # a single failed attempt is final.
+                    hard_fails = self.config["max_retries"]
+
                 if (not done
                         and executor_type == "direct"
                         and self._should_promote_direct_to_agent(task, outcome)):
@@ -130,9 +193,27 @@ class Supervisor:
                     print("🔀 [Kowalski] Direct failed structurally — switching to agent for next retry.")
 
             if not done:
+                # on_incomplete() may run `git clean` — do this before writing the
+                # runlog entry so the fresh log line doesn't get swept away.
                 mode.on_incomplete(task, executor_type)
+
+            log_run(self.dev_root, self.config, {
+                "task_id": task.get("id"),
+                "strategy": strategy.describe(),
+                "executor_type": executor_type,
+                "attempts": n,
+                "hard_fails": hard_fails,
+                "resumes": resumes,
+                "outcome": "OK" if done else "INCOMPLETE",
+                "escalated": escalated,
+                "escalation_reason": escalation_reason,
+                "duration_s": time.time() - task_started_at,
+                "token_estimate": cumulative_tokens,
+            })
+
+            if not done:
                 self.services.stop()
-                return
+                return False
 
             task = mode.next_task()
 
@@ -149,4 +230,4 @@ class Supervisor:
         if callable(close):
             close()
         self.services.stop()
-        return
+        return True

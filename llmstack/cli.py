@@ -314,10 +314,10 @@ def _restart_inference_server_if_running(config, force=False):
     stopped and the active backend is started in its place.
     """
     stack = ServiceStack(config)
-    served = served_model_id(expected_target=stack.backend.model_target())
+    served = served_model_id(port=int(config.get("inference_port", 8787)), health_url=config.get("inference_health_url"), expected_target=stack.backend.model_target())
     expected = stack.backend.model_target()
     if served is None:
-        print("ℹ️  [llmstack] No inference server on :8787; skipping server restart "
+        print("ℹ️  [llmstack] No inference server on configured inference port; skipping server restart "
               "(it will start with the active backend on next 'llmstack run').")
         return
     if served == expected:
@@ -719,7 +719,7 @@ def run_orchestrator(config, args):
     stack = ServiceStack(config)
     stack.ensure_running()
     supervisor = Supervisor(config, config["dev_root"], stack)
-    supervisor.run()
+    return 0 if supervisor.run() else 2
 
 
 def main(argv=None):
@@ -741,15 +741,15 @@ def main(argv=None):
     if args.command == "serve":
         return run_dflash(config, args)
     elif args.command == "proxy":
-        run_proxy(config, args)
+        return run_proxy(config, args)
     elif args.command == "interactive":
-        run_interactive(config, args)
+        return run_interactive(config, args)
     elif args.command == "run":
-        run_orchestrator(config, args)
+        return run_orchestrator(config, args)
     elif args.command == "dashboard":
-        run_dashboard(config, args)
+        return run_dashboard(config, args)
     elif args.command == "doctor":
-        run_doctor(config, args)
+        return run_doctor(config, args)
     elif args.command == "model":
         return run_model(config, args)
     else:

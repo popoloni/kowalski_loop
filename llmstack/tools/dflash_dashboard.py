@@ -3,12 +3,17 @@ import json
 import os
 import re
 import time
+import threading
 import urllib.request
+import uuid
 from collections import deque
+from datetime import datetime, timezone
 
 import psutil
 from llmstack.config import DEFAULT_CONFIG, apply_runtime_network_defaults
 from llmstack.services.inference_probe import detect_running_model
+from llmstack.tools import power_sampler
+from llmstack.tools.power_sampler import get_battery_info
 from rich.align import Align
 from rich.layout import Layout
 from rich.live import Live
@@ -37,6 +42,13 @@ CSV_HEADER = [
     "prefill_real_tps",
     "mlx_active_gb",
     "mlx_peak_gb",
+    "gpu_power_w",
+    "cpu_power_w",
+    "thermal_throttled",
+    "wall_start_s",
+    "wall_end_s",
+    "session_id",
+    "accepted_tokens",
 ]
 
 RE_TS = re.compile(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})")
@@ -123,6 +135,8 @@ def _load_runtime_config(config_path=CONFIG_PATH):
         "inference_health_url": cfg["inference_health_url"],
         "headroom_health_url": cfg["headroom_health_url"],
         "inference_port": cfg["inference_port"],
+        "enable_power_sampling": cfg.get("enable_power_sampling", False),
+        "hardware": cfg.get("hardware", {}),
     }
 def detect_active_backend(cfg):
     probe = detect_running_model(port=cfg.get("inference_port", DEFAULT_CONFIG["inference_port"]), health_url=cfg["inference_health_url"], timeout=1.0, expected_target=cfg.get("active_target"))
@@ -167,6 +181,9 @@ class DFlashParser(BaseInferenceParser):
         ts = _parse_ts(line)
         if "[dflash]" in line:
             monitor.last_log_wall = time.time()
+            # This must happen before the cache/prefill branches return.
+            if ("prefill:" in line or "prefix cache hit" in line) and monitor._request_start_wall is None:
+                monitor._request_start_wall = time.time()
 
         m = RE_DF_CACHE.search(line)
         if m:
@@ -206,6 +223,16 @@ class DFlashParser(BaseInferenceParser):
             pf_time = monitor.pf_time if monitor.pf_time > 0 else max(tot - dec_time, 0.0)
             if monitor.pending:
                 monitor.commit(monitor.pending)
+            # Build pending record with energy columns
+            wall_start = monitor._request_start_wall if monitor._request_start_wall else time.time()
+            wall_end = time.time()
+            gpu_power, cpu_power, thermal_throttled = monitor.capture_power_sample(wall_start, wall_end)
+
+            mlx_active_val = float(monitor.mlx_active) if monitor.mlx_active != "N/A" else None
+            mlx_peak_val = None
+            if monitor.pending and "mlx_peak_gb" in monitor.pending:
+                mlx_peak_val = monitor.pending["mlx_peak_gb"]
+
             monitor.pending = {
                 "backend": self.name,
                 "served_target": monitor.runtime.get("served_target"),
@@ -220,11 +247,21 @@ class DFlashParser(BaseInferenceParser):
                 "total_time_s": round(tot, 1),
                 "accept_pct": round(float(m.group("acc")), 1),
                 "prefill_real_tps": real,
+                "mlx_active_gb": mlx_active_val,
+                "mlx_peak_gb": mlx_peak_val,
+                "gpu_power_w": gpu_power,
+                "cpu_power_w": cpu_power,
+                "thermal_throttled": thermal_throttled,
+                "wall_start_s": round(wall_start, 3) if wall_start else "",
+                "wall_end_s": round(wall_end, 3),
+                "session_id": monitor.session_id,
+                "accepted_tokens": tok,
             }
             monitor.phase = "IDLE"
             monitor.dec_tok, monitor.dec_tps, monitor.dec_time = tok, tps, dec_time
             monitor.pf_time = 0.0
             monitor.cached = 0
+            monitor._request_start_wall = None
             return
 
         m = RE_DF_MEM.search(line)
@@ -266,6 +303,10 @@ class TurboQuantParser(BaseInferenceParser):
         now = time.time()
         self.req_counter += 1
         elapsed = (now - self.req_start_wall) if self.req_start_wall else 0.0
+
+        # Energy columns for TurboQuant
+        gpu_power, cpu_power, thermal_throttled = monitor.capture_power_sample(self.req_start_wall, now)
+
         rec = {
             "backend": self.name,
             "served_target": monitor.runtime.get("served_target"),
@@ -283,6 +324,13 @@ class TurboQuantParser(BaseInferenceParser):
             "prefill_real_tps": None,
             "mlx_active_gb": None,
             "mlx_peak_gb": None,
+            "gpu_power_w": gpu_power,
+            "cpu_power_w": cpu_power,
+            "thermal_throttled": thermal_throttled,
+            "wall_start_s": round(self.req_start_wall, 3) if self.req_start_wall else round(now, 3),
+            "wall_end_s": round(now, 3),
+            "session_id": monitor.session_id,
+            "accepted_tokens": None,
         }
         monitor.commit(rec)
         monitor.phase = "IDLE"
@@ -388,13 +436,127 @@ class Monitor:
 
         self.parser = self._make_parser(self.runtime["backend_name"])
 
-        new = (not os.path.exists(self.csv_file)) or os.path.getsize(self.csv_file) == 0
+        # Power/energy tracking
+        self.session_id = str(uuid.uuid4())
+        self._is_laptop = power_sampler.is_laptop()
+        self._battery_info = None
+        self._power_sampling_enabled = self.cfg.get("enable_power_sampling", False)
+        self._hardware = self.cfg.get("hardware", {})
+        self._request_start_wall = None
+        self._power_samples = deque(maxlen=7200)
+        self._power_lock = threading.Lock()
+        self._power_stop = threading.Event()
+        self._power_thread = None
+
         os.makedirs(os.path.dirname(self.csv_file), exist_ok=True)
-        self.csv_fp = open(self.csv_file, "a", newline="")
+
+        # The dashboard must both inspect/rewrite the header and append new rows.
+        # "a" is write-only, while "a+" still forces every write to EOF even
+        # after seek(0), so use an update mode and explicitly seek to EOF once
+        # header maintenance is complete.
+        csv_mode = "r+" if os.path.exists(self.csv_file) else "w+"
+        self.csv_fp = open(self.csv_file, csv_mode, newline="", encoding="utf-8")
         self.csv_w = csv.writer(self.csv_fp)
-        if new:
+
+        # Always ensure the header matches CSV_HEADER.
+        # Never delete data — replace only the stale first header row.
+        self.csv_fp.seek(0)
+        existing_header = self.csv_fp.readline().strip()
+        needs_header = existing_header != ",".join(CSV_HEADER)
+
+        if needs_header:
+            # Rewrite file: new header + all existing data rows. An empty file
+            # has no old header, so there are no rows to preserve.
+            self.csv_fp.seek(0)
+            lines = self.csv_fp.readlines()
+            self.csv_fp.seek(0)
             self.csv_w.writerow(CSV_HEADER)
+            for line in lines[1:]:  # skip the old/stale header
+                stripped = line.strip()
+                if stripped:
+                    self.csv_fp.write(stripped + "\n")
+            self.csv_fp.truncate()
             self.csv_fp.flush()
+
+        # r+/w+ do not have append semantics. Keep the writer at EOF so calls
+        # to commit() append records instead of overwriting existing rows.
+        self.csv_fp.seek(0, os.SEEK_END)
+
+        if self._power_sampling_enabled:
+            self._power_thread = threading.Thread(
+                target=self._power_sampling_loop,
+                name="kowalski-power-sampler",
+                daemon=True,
+            )
+            self._power_thread.start()
+
+    def _power_sampling_loop(self):
+        """Continuously sample power while the dashboard is running."""
+        log_dir = os.path.dirname(self.csv_file) or "logs"
+        while not self._power_stop.is_set():
+            sample = {}
+            error = ""
+            try:
+                sample = power_sampler.sample_powermetrics()
+                error = power_sampler.get_last_power_error()
+            except Exception as exc:
+                error = f"unexpected sampling error: {exc}"
+
+            captured_at = time.time()
+            try:
+                power_sampler.write_power_sample(log_dir=log_dir, sample=sample, error=error)
+            except Exception:
+                pass
+
+            if sample and any(value is not None for value in sample.values()):
+                record = dict(sample)
+                record["epoch_s"] = captured_at
+                with self._power_lock:
+                    self._power_samples.append(record)
+                # A successful powermetrics call already consumes roughly the
+                # one-second sampling interval, so start the next sample now.
+                continue
+
+            # Avoid flooding the diagnostic CSV when sudo is unavailable.
+            self._power_stop.wait(5.0)
+
+    def capture_power_sample(self, wall_start=None, wall_end=None):
+        """Return average power measured during a request window."""
+        if not self._power_sampling_enabled:
+            return "", "", ""
+
+        end_s = float(wall_end or time.time())
+        start_s = float(wall_start or end_s)
+        with self._power_lock:
+            samples = [
+                sample for sample in self._power_samples
+                if start_s <= float(sample.get("epoch_s", 0.0)) <= end_s
+            ]
+            # A powermetrics sample represents the preceding interval and may
+            # be timestamped just after the request ended. Include one nearby
+            # sample as a fallback for very short requests.
+            if not samples and self._power_samples:
+                latest = self._power_samples[-1]
+                if abs(float(latest.get("epoch_s", 0.0)) - end_s) <= 2.0:
+                    samples = [latest]
+
+        if not samples:
+            return "", "", ""
+
+        def average(key):
+            values = [float(item[key]) for item in samples if item.get(key) is not None]
+            return round(sum(values) / len(values), 4) if values else ""
+
+        thermal_states = [str(item.get("thermal_state") or "") for item in samples]
+        known_thermal = [state for state in thermal_states if state]
+        if any("thrott" in state.lower() for state in known_thermal):
+            thermal_throttled = "yes"
+        elif known_thermal:
+            thermal_throttled = "no"
+        else:
+            thermal_throttled = ""
+
+        return average("gpu_power_w"), average("cpu_power_w"), thermal_throttled
 
     def _make_parser(self, backend_name):
         if backend_name in ("turboquant", "mlx"):
@@ -530,6 +692,30 @@ class Monitor:
         t.add_row("MLX cache:", f"{_fmt(self.mlx_cache)} GB" if self.mlx_cache != "N/A" else "N/A")
         t.add_row("RSS:", f"{_fmt(self.rss_now)} GB" if self.rss_now != "N/A" else "N/A")
         return Panel(t, title="[bold]Hardware[/bold]", border_style="cyan")
+
+    def panel_battery(self):
+        """Show battery info on laptops, skip on desktops."""
+        if not self._is_laptop:
+            return None
+        self._battery_info = get_battery_info()
+        if self._battery_info is None:
+            return None
+        bat = self._battery_info
+        pct = bat.get("percent", 0)
+        plugged = bat.get("plugged", False)
+        secs = bat.get("secsleft", -1)
+
+        if plugged:
+            est = "Plugged"
+        elif secs and secs > 0:
+            hours = secs // 3600
+            mins = (secs % 3600) // 60
+            est = f"{hours}h {mins}m"
+        else:
+            est = "Calculating..."
+
+        btext = f"🔋 {pct}% | Plugged: {'Yes' if plugged else 'No'} | Est: {est}"
+        return Panel(btext, title="[bold]Battery[/bold]", border_style="green")
 
     def panel_current(self):
         c = {"IDLE": "bold green", "PREFILLING": "bold yellow blink", "DECODING": "bold cyan blink"}.get(
@@ -681,6 +867,7 @@ class Monitor:
         layout = Layout()
         layout.split_column(
             Layout(name="header", size=3),
+            Layout(name="battery", size=1),
             Layout(name="main", size=12),
             Layout(name="bottom"),
         )
@@ -694,11 +881,55 @@ class Monitor:
             Layout(self.panel_hr_requests(), name="hrr"),
         )
         layout["header"].update(Panel(Align.center(header_text), style="bold white on blue"))
+
+        # Battery panel (laptop only)
+        bat_panel = self.panel_battery()
+        if bat_panel:
+            layout["battery"].update(bat_panel)
+        else:
+            layout["battery"].update("")
+
         return layout
 
     def close(self):
+        self._power_stop.set()
+        if self._power_thread and self._power_thread.is_alive():
+            self._power_thread.join(timeout=3.0)
         try:
             self.csv_fp.close()
+        except Exception:
+            pass
+        # Write session summary
+        self._write_session_summary()
+
+    def _write_session_summary(self):
+        """Write aggregated energy/cost data to logs/session_summary.jsonl."""
+        try:
+            log_dir = os.path.dirname(self.csv_file) or "logs"
+            summary_path = os.path.join(log_dir, "session_summary.jsonl")
+
+            energy_data = power_sampler.compute_session_energy(
+                timings_csv=self.csv_file,
+                power_csv=os.path.join(log_dir, "power_metrics.csv")
+                if self._power_sampling_enabled
+                else None,
+                hardware=self._hardware,
+            )
+
+            if not energy_data:
+                return
+
+            summary = {
+                "session_id": self.session_id,
+                "start": str(self.recent[-1].get("timestamp", "")) if self.recent else "",
+                "end": datetime.now(timezone.utc).isoformat(),
+                "total_calls": self.total_calls,
+            }
+            summary.update(energy_data)
+
+            with open(summary_path, "a") as f:
+                f.write(json.dumps(summary) + "\n")
+                f.flush()
         except Exception:
             pass
 

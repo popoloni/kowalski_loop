@@ -1,0 +1,22 @@
+{
+  "dev_root": "workspace-js",
+  "project_type": "js",
+  "project_template": {
+    "name": "js",
+    "language": "javascript",
+    "description": "JavaScript project template with package.json, src/, and tests/",
+    "starter_layout": [
+      "package.json",
+      "src/",
+      "tests/"
+    ],
+    "plan_name": "js_plan.json"
+  },
+  "project_goal": "Build a JS tool",
+  "plan_file": "./.claude/plans/js_plan.json",
+  "active_model": "dflash-qwen27b",
+  "loop_mode": "plan",
+  "permission_mode": "acceptEdits",
+  "thinking_mode": "off",
+  "verification_plugins": {}
+}

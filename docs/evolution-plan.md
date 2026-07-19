@@ -12,10 +12,16 @@
 | **Phase 1** | Model generalization (registry, DFlash/TurboQuant backends, model-aware CCR, `model use/list/recommend`, hardening 1.9–1.13) | ✅ **Done** |
 | **Phase 2** | Loop modes (`plan`/`continuous`/`watch`/`supervised`) + priority ordering + smart retry | ✅ **Done** (2026-07-01) |
 | **Phase 3** | Pragmatic extensibility: pluggable gates + minimal `llmstack init` + per-task `thinking_mode` | ✅ **Done** (2026-07-01) |
+| **Phase 3.5** | Loop strategy generalization (pluggable `LoopStrategy` layer: run-until-done feedback, maker/checker, context policy, budget guard, safety gates) — prerequisite for Phases 4-7 | ✅ **Done** (2026-07-18) |
 | **Phase 4** | Control plane (IPC bus, pause/stop) + Telegram notifier/controller | ⬜ **Not started** |
 | **Phase 5** | Dashboards & analytics (state-driven TUI, web dashboard, SQLite metrics) | ⬜ **Not started** |
-| **Phase 6** | Multi-project workflow (`project use`, named configs, project-scoped defaults) | ⬜ **Not started** |
+| **Phase 6** | Multi-project workflow (`project use`, named configs, project-scoped defaults) + deferred multi-loop coordination & worktree parallelization (§9.5) | ⬜ **Not started** |
 | **Phase 7** | Automated installation (`install.sh`/`doctor.sh`/`update.sh`) | ⬜ **Not started** |
+| **H1** | Cross-Task Dependency Graph (topological sort, `depends_on` schema, visual graph) | ⬜ **Not started** |
+| **H2** | Task-Level Token Budget with Adaptive Prompt Trimming (cumulative tracking, context trimming, direct fallback) | ⬜ **Not started** |
+| **H3** | Plan Auto-Regeneration from Git Diff (compare dev_root vs committed, auto-generate tasks, suggest gates) | ⬜ **Not started** |
+| **H4** | Multi-Model Task Routing (per-task model selection, hot-swap, cost/speed optimization) | ⬜ **Not started** |
+| **H5** | Self-Healing Plans (post-mortem learning, `lessons.jsonl`, cross-plan pattern avoidance) | ⬜ **Not started** |
 
 **Verification basis (code inspection + tests, 2026-07-01):**
 - `llmstack/modes/` contains `base.py` (`LoopMode` ABC), `plan_mode.py`, `continuous_mode.py`, `watch_mode.py`, `supervised_mode.py`, all exported from `__init__.py`.
@@ -28,6 +34,7 @@
 - Corner-case suite `tests/test_phase2_modes.py` (13 checks: priority/ties, bad priority, all-done, continuous empty/append/invalid-JSON/list-shape/persist, watch enqueue/ignore/close-idempotent, supervised quit/skip, smart-retry note) → **ALL PASS**.
 - Phase 3 gate suite `tests/test_phase3_pluggable_gates.py` (8 checks: defaults disabled, invalid config fails fast, language/file filtering, smart-retry feedback, task opt-in/out, direct `plan_complete`, supervisor end hook) → **ALL PASS**.
 - Phase 3 init suite `tests/test_phase3_init_wizard.py` (3 checks: config creation + bootstrap plan, overwrite refusal, force overwrite) → **ALL PASS**.
+- Phase 3.5 loop-strategy suite `tests/test_phase3_5_loop_strategy.py` (16 checks: schema normalization/validation, preset expansion, plan/task merge, safety guardrail denylist/cap, independent checker pass/fail, budget guard dimensions, context_policy trimming, and 3 end-to-end `Supervisor.run()` integration tests) → **ALL PASS**.
 - No `control/`, `notify/`, or `dashboard/` packages exist yet under `llmstack/` (Phase 4+).
 
 ### Phase 3 follow-up refinements
@@ -35,11 +42,11 @@
 - Add a non-interactive `llmstack init` flow beyond `--force` so the wizard can be scripted end-to-end.
 - Add more explicit starter config templates for `python`, `js`, and `generic` projects.
 
-### 👉 Recommended next step — **Phase 4 (control plane + Telegram)**
+### 👉 Recommended next step — **Phase 4 (control plane + Telegram) + H1 (dependency graph)**
 
-Phase 3 is complete. The next meaningful seam is the control plane/state bus, because remote pause/stop/status and Telegram all become much cleaner once there is a shared runtime state surface.
+Phase 3.5 is complete: the Kowalski loop now supports pluggable `loop_strategy` blocks (execution feedback/run-until-done, independent maker/checker, budget guard + runlog, safety gates, context policy) anchored at `Supervisor.run()`, with a fully backward-compatible default and a dedicated test suite (`tests/test_phase3_5_loop_strategy.py`, 16 checks, ALL PASS) alongside zero regressions in every pre-existing suite. See §6.5 below for the implementation reality check.
 
-Then proceed to **Phase 4** for IPC + remote control. **Phase 5** (dashboards) remains downstream of the control/state surface. **Multi-project** moves later because it is the most likely to be reshaped by project-scoped control, notifier, and dashboard state.
+Proceed to **Phase 4** for IPC + remote control, which can now expose the budget/escalation/checker events and runlog data that Phase 3.5 introduced. **H1 (Cross-Task Dependency Graph)** is low-effort and can be interleaved with Phase 4 since it extends the existing `LoopMode._ordered_tasks()` priority sorting. **H4 (Multi-Model Task Routing)** is also interleavable with Phase 4 since it extends the existing model registry + hot-swap infrastructure from Phase 1. **Phase 5** (dashboards) remains downstream of the control/state surface. **Multi-project** (Phase 6) moves later because it is the most likely to be reshaped by project-scoped control, notifier, and dashboard state, and because it now also hosts the deferred parallelization work (§9.5).
 
 ---
 
@@ -554,14 +561,44 @@ Goal: expose a controllable quality/cost knob for agentic tasks.
 
 ---
 
+## 6.5 · Phase 3.5 — Loop Strategy Generalization (prerequisite for Phases 4-7) — ✅ DONE (2026-07-18)
+
+Kowalski's loop is currently a single engine: it reads `plan.json`, dispatches each task as `direct` or `agent`, and retries/resumes until a step verifies. This phase generalizes that engine into a set of **pluggable loop strategies** while keeping **Claude Code as the agentic engine** — only the "how to iterate" decision becomes swappable, not the executor.
+
+**Architecture note (verified in code):** the real generic retry/resume/promotion loop — budget counters, health checks, and `direct → agent` promotion (`_should_promote_direct_to_agent`) — lives in the inner `while` of `Supervisor.run()`, shared by *every* `LoopMode` (`plan`/`continuous`/`watch`/`supervised`). The new `LoopStrategy` abstraction is anchored there, not only inside `LoopMode.on_result()`, so all existing modes inherit it automatically.
+
+Full design detail is tracked in [plan-kowalskiLoopGeneralization.prompt.md](plan-kowalskiLoopGeneralization.prompt.md). User-facing docs live in [README.md § Loop Strategy](../README.md#loop-strategy-loop_strategy).
+
+### Phase 3.5 reality check (implemented)
+
+| # | Task | Status | Updated acceptance / notes |
+|---|------|--------|----------------------------|
+| 3.5.1 | Inventory the current contract (`Supervisor.run()`, `LoopMode`, `Executor`, `gates`, `plan.json`/`task_queue.json` fields) | ✅ Done | Confirmed the retry/resume/promotion loop lives in `Supervisor.run()`, shared by all `LoopMode`s (see architecture note above). |
+| 3.5.2 | Extend the plan schema with an optional `strategy` block (task- or plan-level) | ✅ Done (implemented differently) | Field is named **`loop_strategy`**, not `strategy` — the pre-existing `task["strategy"]` string (`"edit"`/`"rewrite"`, used by `Executor.choose_executor()`) already occupied that key, so a new key was required to stay backward-compatible. Legacy plans without `loop_strategy` anywhere run identically to before. |
+| 3.5.3 | Introduce a `LoopStrategy` abstraction anchored at `Supervisor.run()` with a legacy adapter reproducing current behavior | ✅ Done (implemented differently) | `llmstack/core/strategy.py`'s `LoopStrategy` exposes pragmatic hooks (`check_safety`, `run_checker`, `budget_exceeded`, `effective_context`, `describe`) called directly from `Supervisor.run()`, rather than the originally-sketched `prepare_attempt`/`select_executor`/`next_action`/`on_budget`/`on_escalation` names. `resolve_loop_strategy(task, plan)` with no `loop_strategy` anywhere returns a fully inert spec, verified byte-for-byte compatible by `tests/test_phase3_5_loop_strategy.py`. |
+| 3.5.4 | Reuse the existing `verification_plugins` mechanism (`when=task\|plan_complete`) for completion-criteria and safety strategies instead of a new plugin system | ⚠️ Done differently (not reused) | The checker/safety gates run **inside `Supervisor.run()`, after the executor's outcome comes back** (so a safety violation can halt the whole run, not just fail one gate), whereas `verification_plugins` run **inside `gates.verify_detailed()`**, before the outcome reaches the supervisor at all. The two mechanisms operate at different points in the control flow and were kept separate; `verification_plugins`/`gates.py` are untouched. |
+| 3.5.5 | Execution feedback / run-until-done strategy | ✅ Done | Formalized as `loop_strategy.run_until_done` (default `true` = today's behavior); `false` opts out of the smart-retry loop after the first failed attempt. |
+| 3.5.6 | Independent maker/checker strategy (separate prompt/permissions from the implementer) | ✅ Done | `loop_strategy.checker.command` reuses the `{file}`/`{dev_root}` interpolation convention from `verification_plugins`; a failing checker downgrades `OK` → `VERIFY_FAILED` and feeds its stdout/stderr into the next retry via the existing `_verify_feedback` mechanism. |
+| 3.5.7 | RAG/context injection policy | ✅ Done (narrower than "RAG") | Implemented as `loop_strategy.context_policy` (`"full"` default vs `"changed_only"`), trimming a task's `context` list to already-changed files for **direct-mode** generation only (agent-mode context comes from Claude's own tool calls, so this is a no-op there). No retrieval/embedding-based RAG was built. |
+| 3.5.8 | Budget guard + runlog (**greenfield**) | ✅ Done | `llmstack/core/runlog.py` (`estimate_tokens()` char-count proxy, append-only JSONL `log_run()`) + `loop_strategy.budget` (`max_attempts`, `max_duration_seconds`, `max_token_estimate`), checked before each attempt in `Supervisor.run()`. Every task run — even without `loop_strategy` set — appends one entry to `logs/kowalski_runlog.jsonl`. |
+| 3.5.9 | Safety guardrails (**greenfield**) | ✅ Done | `loop_strategy.risk_policy` (`denylist` glob patterns + `max_changed_files`); a violation rolls back the change and halts `Supervisor.run()` for human review instead of retrying automatically. |
+| 3.5.10 | Document Phase A presets: `simple_direct`, `agent_run_until_done`, `verified_maker_checker`, `safe_repo_edit` | ✅ Done | Documented with tradeoffs in [README.md § Loop Strategy](../README.md#loop-strategy-loop_strategy); implemented in `llmstack/core/strategy.py`'s `PRESETS`. |
+
+**New test suite:** `tests/test_phase3_5_loop_strategy.py` (16 checks: schema normalization/validation, preset expansion, plan/task merge semantics, safety guardrail denylist/cap, independent checker pass/fail, budget guard dimensions, context_policy trimming, and 3 end-to-end `Supervisor.run()` integration tests) → **ALL PASS**, alongside zero regressions in `tests/test_phase2_modes.py`, `tests/test_phase3_pluggable_gates.py`, `tests/test_phase3_init_wizard.py`, and `tests/test_phase4_active_model_detection.py`.
+
+**Explicitly out of scope for Phase 3.5** (deferred to Phase 6, see §9.5): worktree isolation, multi-loop coordination (`acting_on` registry), and any domain loop template that requires concurrent/parallel execution. Now that the `LoopStrategy` abstraction exists, these remain deliberately deferred — they are riskier due to `GitManager`'s current single-working-tree checkpoint/rollback model.
+
+---
+
 ## 7 · Phase 4 — Control Plane & Remote (Telegram)
 
 ### 7.1 Control plane (prerequisite for remote)
-Phase 0 introduced `control/bus.py` + `control/state.py`. Here we expose them after Phase 3 hardens the single-process UX and gate model:
+Phase 4 introduces the first `control/` package. It should create the shared runtime state surface that Phase 3.5 events can feed, then expose it through IPC:
 | # | Task | Acceptance criteria |
 |---|------|---------------------|
-| 4.1 | `control/ipc.py` — UNIX-socket command server (pause/resume/stop/status/inject-task) | `llmstack ctl status` returns live state |
-| 4.2 | Wire `bus.wait_if_paused()` / `should_stop()` into supervisor | `llmstack ctl pause` halts after current task |
+| 4.1 | `control/state.py` + `control/bus.py` — shared runtime state, event stream, and command queue | Current task, strategy, budget, checker verdict, escalation, service health, and stop/pause state are visible in-process |
+| 4.2 | `control/ipc.py` — UNIX-socket command server (pause/resume/stop/status/inject-task) | `llmstack ctl status` returns live state |
+| 4.3 | Wire `bus.wait_if_paused()` / `should_stop()` into supervisor | `llmstack ctl pause` halts after current task |
 
 ### 7.2 Telegram notifier + controller
 ```json
@@ -577,11 +614,11 @@ Phase 0 introduced `control/bus.py` + `control/state.py`. Here we expose them af
 
 | # | Task | Acceptance criteria |
 |---|------|---------------------|
-| 4.3 | `notify/telegram.py` implements `Notifier.emit(event)` | Task events arrive in chat |
-| 4.4 | Auto notifications: complete / failed / plan done / crash / stalled | Each event delivered once |
-| 4.5 | Command handlers: `/status`, `/plan`, `/stop`, `/pause`, `/resume`, `/logs [n]`, `/metrics` | Commands drive the IPC control plane |
-| 4.6 | Advanced: `/task "<prompt>"` (inject), `/model list`, `/model use <name>` | Inject reaches the queue; model switch restarts services |
-| 4.7 | Security: token from env var only, `allowed_chat_ids` whitelist, per-command rate limit | Unknown chat IDs rejected; no secret in repo |
+| 4.4 | `notify/telegram.py` implements `Notifier.emit(event)` | Task events arrive in chat |
+| 4.5 | Auto notifications: complete / failed / plan done / crash / stalled | Each event delivered once |
+| 4.6 | Command handlers: `/status`, `/plan`, `/stop`, `/pause`, `/resume`, `/logs [n]`, `/metrics` | Commands drive the IPC control plane |
+| 4.7 | Advanced: `/task "<prompt>"` (inject), `/model list`, `/model use <name>` | Inject reaches the queue; model switch restarts services |
+| 4.8 | Security: token from env var only, `allowed_chat_ids` whitelist, per-command rate limit | Unknown chat IDs rejected; no secret in repo |
 
 **Notification examples:** `✅ Task 5/22 ghosts.js (12.3s)` · `❌ Task 6 failed after 3 attempts (verify gate)` · `🎉 Plan complete 22/22 in 45m` · `🔥 DFlash crashed — restarting`.
 
@@ -598,7 +635,7 @@ Phase 0 introduced `control/bus.py` + `control/state.py`. Here we expose them af
 
 ---
 
-## 9 · Phase 6 — Multi-Project Workflow
+## 9 · Phase 6 — Multi-Project Workflow (+ Deferred Parallelization, §9.5)
 
 | # | Task | Notes |
 |---|------|-------|
@@ -624,9 +661,111 @@ Phase 0 introduced `control/bus.py` + `control/state.py`. Here we expose them af
 }
 ```
 
+### 9.5 Multi-loop coordination & worktree parallelization (deferred from Phase 3.5)
+
+Phase 3.5 (§6.5) intentionally postpones parallel execution strategies because they are higher-risk and align naturally with the project-scoping work already happening in this phase.
+
+| # | Task | Notes |
+|---|------|-------|
+| 6.5 | Worktree isolation — each parallel task/agent gets its own `git worktree` branch; merge surfaces conflicts instead of silently losing work | Requires redesigning `GitManager` (`core/git_ckpt.py`) checkpoint/rollback for a per-worktree model, not just a new policy flag |
+| 6.6 | Multi-loop coordination — shared `acting_on` registry with priority-based claim arbitration so concurrent loops (e.g. across projects) don't duplicate work | Requires a stable, unique task identity across processes/plans (verify before implementing) |
+| 6.7 | Parallel-dependent domain loop templates (CI sweeper across concurrent PRs, dependency sweeper batches, PR babysitter concurrency) | Depend on 6.5/6.6 primitives; do not start before those land |
+| 6.8 | Extended presets: `parallel_worktree`, `ci_repair`, `release_cleanup` | Document tradeoffs, cost, and stop criteria per preset |
+
 ---
 
-## 10 · Phase 7 — Automated Installation (LAST)
+## 10.5 · High-Value Additions (Not in original evolution-plan.md)
+
+These enhancements were identified as gaps that deliver significant value with relatively modest effort. They are ordered by priority (effort × impact) and can be interleaved with Phases 4–7 where they don't block each other.
+
+### H1. Cross-Task Dependency Graph
+**Current gap:** Tasks are ordered by `priority` only — no explicit dependencies.
+
+**Proposal:** Add `depends_on: ["task_01", "task_03"]` to task schema:
+- Topological sort respects both priority AND dependencies
+- If a dependency fails, dependent tasks are automatically skipped (not retried)
+- Visual dependency graph in dashboard
+
+**Why:** Real projects have implicit dependencies (e.g., "database migration" must run before "API endpoints").
+
+**Schema change:** Add optional `depends_on: string[]` field to `plan.json` task objects. Topological sort runs in `PlanMode._ordered_tasks()` after priority sort.
+
+**Effort:** Low. **Impact:** High.
+
+### H2. Task-Level Token Budget with Adaptive Prompt Trimming
+**Current gap:** `max_tokens` is a response limit, not a budget.
+
+**Proposal:** Per-task token budget that:
+- Tracks cumulative tokens across all attempts (reuses `runlog.py` `estimate_tokens()`)
+- When budget is 80% consumed, automatically trims `context` files to most relevant ones
+- Falls back to `direct` mode if agent mode is too expensive
+
+**Why:** Prevents runaway costs on long-running tasks without hard timeouts.
+
+**Integration:** Extends `loop_strategy.budget` with `max_token_estimate` per-task (independent of plan-level budget). Uses existing `budget_exceeded()` hook in `Supervisor.run()`.
+
+**Effort:** Medium. **Impact:** Medium.
+
+### H3. Plan Auto-Regeneration from Git Diff
+**Current gap:** Plans are static JSON — manual updates required.
+
+**Proposal:** `llmstack plan regenerate` that:
+- Compares current `dev_root` against last committed state
+- Auto-generates tasks for all changed files (new, modified, deleted)
+- Suggests verification gates based on file type and change scope
+
+**Why:** Reduces plan authoring from "write JSON manually" to "review and approve suggestions."
+
+**Implementation:** New CLI subcommand calling `build_plan.py` with `--regenerate` flag, using `git diff` against HEAD to identify changed files, then invoking LLM to suggest tasks + gates.
+
+**Effort:** High. **Impact:** High.
+
+### H4. Multi-Model Task Routing
+**Current gap:** One active model for the entire plan.
+
+**Proposal:** Per-task model selection:
+```json
+{ "id": "task_01", "prompt": "...", "file": "index.html", "model": "dflash-qwen27b" }
+{ "id": "task_02", "prompt": "...", "file": "ml_model.py", "model": "gemma4-12b" }
+```
+- Hot-swap models between tasks (reloading into RAM)
+- Route simple tasks to faster/smaller models, complex tasks to larger ones
+
+**Why:** Optimizes cost/speed trade-offs per-task without manual model switching.
+
+**Integration:** Extends `task["model"]` field; `Executor._choose_executor()` checks model registry for per-task override. Hot-swap triggers `_restart_inference_server_if_running()` (already implemented in 1.9) between tasks.
+
+**Effort:** Medium. **Impact:** High.
+
+### H5. Self-Healing Plans (Post-Mortem Learning)
+**Current gap:** Failed tasks are abandoned — no cross-plan learning.
+
+**Proposal:** After a plan completes (successfully or not), generate a `lessons.jsonl` entry:
+- "Task 'X' with prompt 'Y' failed 3 times on file 'Z'"
+- "Task 'A' succeeded on attempt 1 with direct mode"
+- Next plan generation references lessons to avoid known failure patterns
+
+**Why:** Turns every run into institutional knowledge for future plans.
+
+**Integration:** New `loop_strategy.learning` block; `Supervisor.run()` appends to `logs/lessons.jsonl` on plan complete. `build_plan.py` reads lessons to bias task generation away from known failure patterns.
+
+**Effort:** High. **Impact:** Medium.
+
+---
+
+### 📊 Priority Matrix (High-Value additions)
+
+| Enhancement | Effort | Impact | Recommended Phase | Status |
+|---|---|---|---|---|
+| H1. Dependency Graph | Low | High | Interleave with Phase 4 | ⬜ Not started |
+| H2. Token Budget | Medium | Medium | Interleave with Phase 4/5 | ⬜ Not started |
+| H3. Auto-Regenerate Plans | High | High | Post-Phase 5 | ⬜ Not started |
+| H4. Multi-Model Routing | Medium | High | Interleave with Phase 4 | ⬜ Not started |
+| H5. Self-Healing Plans | High | Medium | Post-Phase 6 | ⬜ Not started |
+
+---
+
+## 11 · Phase 7 — Automated Installation (LAST)
 
 Installation is automated **only after the codebase is modular and feature-complete**, so the installer provisions a known-good structure rather than a moving target.
 
@@ -640,7 +779,7 @@ Installation is automated **only after the codebase is modular and feature-compl
 > - **CCR `api_base_url` points at Headroom `:8789`**, not dflash `:8787`. Timeout is `3600000` ms in both `API_TIMEOUT_MS` and the provider `timeout`. `NON_INTERACTIVE_MODE: true` is set.
 > - Machine has **64 GB** → *both* paths fit. The current live setup runs the **dense DFlash** path, but per the Part 2 benchmark the **MoE is the better default for the agentic loop** even here (prefill-bound). The installer should default the **agentic** profile to the MoE and offer dense+DFlash as the decode-heavy / max-quality alternative.
 
-### 9.0 Prerequisite captured from manual history (do not skip)
+### 10.0 Prerequisite captured from manual history (do not skip)
 These are the manual gotchas that took trial-and-error and MUST be scripted:
 1. `npm config set allow-scripts=@anthropic-ai/claude-code --location=user` **before** installing Claude (npm now blocks its post-install script).
 2. **Accept the HF license** for `z-lab/Qwen3.6-27B-DFlash` in the browser, then `hf auth login` — gated download fails silently otherwise.
@@ -649,7 +788,7 @@ These are the manual gotchas that took trial-and-error and MUST be scripted:
 5. Cloud keys (`ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`) must be **unset** in every launcher, or Claude silently calls the cloud.
 6. Folder trust must be pre-seeded in `~/.claude.json` (`hasTrustDialogAccepted`, `hasCompletedProjectOnboarding`) so unattended runs don't block on the trust dialog.
 
-### 9.1 `install/install.sh` — master setup
+### 10.1 `install/install.sh` — master setup
 | Step | Action | Exact command / note |
 |------|--------|----------------------|
 | 1 | Choose profile (workload + hardware) | Ask intended use; `sysctl -n hw.memsize` ÷ 1024³. **Agentic OR ≤ ~24 GB → TurboQuant MoE (default)**; **decode-heavy/max-quality AND > 32 GB → DFlash dense**. MoE is the recommended default for Kowalski even on 64 GB (prefill-bound). |
@@ -685,7 +824,7 @@ pkill -f "headroom proxy" 2>/dev/null || true
 # health gate: curl -s http://127.0.0.1:8789/health  AND  grep "127.0.0.1:8787" headroom.log
 ```
 
-### 9.2 `install/doctor.sh` — diagnostics (`llmstack doctor`)
+### 10.2 `install/doctor.sh` — diagnostics (`llmstack doctor`)
 Checks, with the exact expectations above:
 - Tool versions: `python3.14`, `python3.13`, `node@20`, `claude`, `ccr`, `dflash`/`turboquant-serve`, `~/headroom-env/bin/headroom`.
 - `~/headroom-env` exists, is **Python 3.13**, and has **`headroom-ai`** installed.
@@ -697,7 +836,7 @@ Checks, with the exact expectations above:
 - CCR config is multi-model: provider/model catalog includes all configured local models and `Router.*` points to the active one.
 - Health endpoints respond.
 
-### 9.3 `install/update.sh`
+### 10.3 `install/update.sh`
 Update `dflash-mlx`/`turboquant-mlx-full` (project venv), **`headroom-ai`** (its 3.13 venv), `pip` deps, npm globals (`claude` + `ccr`), then `ccr restart`. Optionally check HF for newer model revisions. Print resulting versions.
 
 > An interim manual equivalent already exists: `bin/update_stack.bash` (npm globals, project-venv packages, `headroom-ai` refresh, `ccr restart`, with `--dry-run` support). `install/update.sh` should supersede it or wrap it.
@@ -724,12 +863,22 @@ Update `dflash-mlx`/`turboquant-mlx-full` (project venv), **`headroom-ai`** (its
 2. ✅ **Phase 1 — Model registry / generalization** — *done*
 3. ✅ **Phase 2 — Loop modes + priority ordering + smart retry** — *done*
 4. ✅ **Phase 3 — Pluggable gates + minimal init + per-task thinking_mode** — *done*
-5. ⬅️ **Phase 4 — Control plane + Telegram** — *NEXT*
-6. ⬜ **Phase 5 — Dashboards & analytics**
-7. ⬜ **Phase 6 — Multi-project workflow**
-8. ⬜ **Phase 7 — Automated installation (install/doctor/update)**
+5. ✅ **Phase 3.5 — Loop strategy generalization (`LoopStrategy`, feedback, maker/checker, budget guard, safety gates)** — *done*
+6. ⬅️ **Phase 4 — Control plane + Telegram** — *NEXT*
+7. ⬜ **H1. Cross-Task Dependency Graph** (low effort, high value — interleavable with Phase 4)
+8. ⬜ **H4. Multi-Model Task Routing** (medium effort, high value — interleavable with Phase 4)
+9. ⬜ **H2. Task-Level Token Budget** (medium effort, medium value — interleavable with Phase 4/5)
+10. ⬜ **Phase 5 — Dashboards & analytics**
+11. ⬜ **Phase 6 — Multi-project workflow (+ deferred multi-loop coordination & worktree parallelization, §9.5)**
+12. ⬜ **H3. Plan Auto-Regeneration from Git Diff** (high effort, high value — post-Phase 5)
+13. ⬜ **H5. Self-Healing Plans** (high effort, medium value — post-Phase 6)
+14. ⬜ **Phase 7 — Automated installation (install/doctor/update)**
 
-> Rationale: after Phase 2, the cheapest high-value work is whatever attaches to already-stable seams (`config`, `gates`, `executors`, `cli`) without first requiring shared runtime state. Control, dashboards, and multi-project support all become cleaner once those local seams are hardened; installation still stays last so it targets the final shape.
+> Rationale: after Phase 2, the cheapest high-value work is whatever attaches to already-stable seams (`config`, `gates`, `executors`, `cli`) without first requiring shared runtime state. Phase 3.5 hardens the loop-strategy seam (events, budgets, checker verdicts) that Control, dashboards, and multi-project all consume next. 
+> 
+> **New High-Value additions (H1–H5)** are interleaved where they fit best: H1 (dependency graph) and H4 (multi-model routing) are low/medium effort and can be done alongside Phase 4 since they extend existing config/executor seams. H2 (token budget) extends the existing `loop_strategy.budget` from Phase 3.5. H3 (auto-regenerate) and H5 (self-healing) are higher effort and deferred until after Phases 5–6 when the plan generation pipeline is more mature.
+> 
+> Multi-loop coordination and worktree parallelization are deliberately grouped with multi-project (Phase 6) since both need project/worktree scoping; installation still stays last so it targets the final shape.
 
 ---
 

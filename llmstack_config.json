@@ -1,6 +1,6 @@
 {
   "dev_root": "./prj/pacman256_mvp_clone",
-  "plan_file": "/Users/enricopapalini/.claude/plans/pacman-fixes-v2.json",
+  "plan_file": "./prj/pacman256_mvp_clone/.claude/plans/pacman-fixes-v2.json",
   "local_host": "127.0.0.1",
   "inference_port": 8787,
   "headroom_port": 8789,
@@ -36,6 +36,18 @@
   "turboquant_stability_profile": null,
   "turboquant_stability_overrides": {},
   "active_model": "dflash-qwen35b-moe",
+  "hardware": {
+    "model": "MacBook Pro 14-inch M2 Max",
+    "hw_model_id": "Mac14,5",
+    "ram_gb": 64,
+    "gpu_memory_gb": 57,
+    "purchase_price_usd": 2999,
+    "expected_life_years": 5,
+    "power_supply_w": 140,
+    "avg_grid_cost_kwh": 0.15,
+    "cooling": "active"
+  },
+  "enable_power_sampling": true,
   "models": {
     "dflash-qwen27b-dense": {
       "type": "dflash",

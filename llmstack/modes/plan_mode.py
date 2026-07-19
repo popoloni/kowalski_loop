@@ -1,4 +1,6 @@
 import json
+import os
+import tempfile
 import time
 
 from llmstack.core.gates import verify_detailed
