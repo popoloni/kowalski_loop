@@ -24,3 +24,8 @@ __pycache__/
 
 # VSCode
 .vscode/
+*.zip
+local-llm-workspace.code-workspace
+
+# Python egg-info
+llmstack.egg-info/
